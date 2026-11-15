@@ -60,6 +60,31 @@ jobs:
           echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
 
+      # Each runner makes a fresh ~/.android/debug.keystore, so every run's APK
+      # had a different signer and could not be installed over the previous
+      # build. With the repository secret DEBUG_KEYSTORE_B64 (base64 of a debug
+      # keystore: store/key password `android`, alias `androiddebugkey`, what
+      # AGP's default debug signing config expects) every run signs with that key.
+      - name: Install debug keystore
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          set -eu
+          if [ -z "${DEBUG_KEYSTORE_B64:-}" ]; then
+            msg="DEBUG_KEYSTORE_B64 not set: this APK is signed with a one-off key and cannot be installed over an earlier build"
+            echo "::warning::$msg"
+            echo "> $msg" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          ks=$HOME/.android/debug.keystore
+          mkdir -p "$HOME/.android"
+          printf '%s' "$DEBUG_KEYSTORE_B64" | base64 -d > "$ks"
+          chmod 600 "$ks"
+          fp=$(keytool -list -v -keystore "$ks" -storepass android | grep SHA256 | head -n 1 | sed 's/^[[:space:]]*//')
+          [ -n "$fp" ] || { echo "no SHA256 fingerprint in $ks" >&2; exit 1; }
+          echo "Debug keystore: $fp"
+          echo "Debug keystore certificate: \`$fp\`" >> "$GITHUB_STEP_SUMMARY"
+
       - uses: gradle/actions/setup-gradle@v5
 
       # :app refuses to run its staging task without the git-ignored
@@ -108,8 +133,12 @@ jobs:
             echo "| versionCode | \`$vcode\` |"
             echo "| file | \`$name\` |"
             echo "| sha256 | \`$sha\` |"
-            echo ""
-            echo "Debug-signed with the runner's key: it cannot be installed over an app signed with the original key."
+            # Same value on every run when DEBUG_KEYSTORE_B64 is set; compare it
+            # with the installed build's signer before updating over it.
+            signer=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" 2>/dev/null | grep -m1 'SHA-256 digest' | sed 's/.*: //' || true)
+            if [ -n "$signer" ]; then
+              echo "| signer SHA-256 | \`$signer\` |"
+            fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v6
