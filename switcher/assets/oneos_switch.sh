@@ -2088,7 +2088,7 @@ GUEST_OXYGEN=0; grep -q '^  "image": "oxygenos' "$STAGE/.oneos_stage" 2>/dev/nul
 $BB sh -c "
 BB=\"$BB\"
 [ -n \"\$BB\" ] || BB=\$(which busybox 2>/dev/null || echo /data/adb/ksu/bin/busybox)
-GEN=\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null); PASS=1; BRPID=''
+GEN=\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null); PASS=1; BRPID=''; SYSUI=''
 while true; do
 while true; do
     sleep 2
@@ -3373,6 +3373,16 @@ while true; do
             # the set's ColorPanoramicSystemUI.apk is bound; it adds the app feature and restarts SystemUI once.
             if [ -f \"$STAGE/data/oneos_panoramic_aod.sh\" ]; then
                 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_panoramic_aod.sh >\"$STAGE/panoramic_aod.log\" 2>&1 || echo '[UI Activator] Wallpaper AOD setup failed; see panoramic_aod.log'
+            fi
+
+            # ColorOS SystemUI compiled once per SystemUI.apk (S Ultra, X9U IN, session 146de99d: it ran
+            # from the APK in every session). guest_prepare.sh wrote the script for ColorOS guests; it waits
+            # for the boot and 60 s more in the background, so Home is never held up, and saves its marker
+            # and log in the guest data itself. Once per session: not again after a soft reboot of the guest.
+            if [ -z \"\$SYSUI\" ] && [ -f $STAGE/data/oneos_sysui_compile.sh ]; then
+                SYSUI=1
+                ( $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_sysui_compile.sh ) </dev/null >/dev/null 2>&1 &
+                echo '[UI Activator] SystemUI compile check started (oneos_sysui_compile.log in the guest data)'
             fi
 
             # Pixel Fold8 / Fold8 Ultra: start the system-UID sensor reader in the guest namespace

@@ -81,7 +81,8 @@ for s in data misc misc/adb misc/profiles misc/user misc/bluedroid misc/bluetoot
          system/users/0/face_enrolled_position_0.xml \
          system/watchdog_timestamps system_de system_ce user/0 user_de/0 \
          oneos_bin oneos_bin/busybox zygote_exec oplus oplus/multimedia \
-         preapps-lib media/0 anr app local/tmp resource-cache oneos_fold8 oneos_pixel_hinge oneos_hinge; do
+         preapps-lib media/0 anr app local/tmp resource-cache oneos_fold8 oneos_pixel_hinge oneos_hinge \
+         oneos_sysui_compile.sh; do
     no_symlink "$s"
 done
 # The framework jars must be the ones built with the storage, installd and
@@ -4083,6 +4084,99 @@ echo "=== 5.7 $(date +%T) flags ==="
 # lists out (grants already given stay in the guest's permission state).
 if [ "${ONEOS_GUEST_OPLUS_GRANTS:-1}" = 1 ]; then touch "$STAGE/data/oneos_oplus_grants"; else rm -f "$STAGE/data/oneos_oplus_grants"; fi
 echo "OPPO default grants: $([ -f "$STAGE/data/oneos_oplus_grants" ] && echo on || echo off)"
+
+# ColorOS SystemUI compiled once per SystemUI.apk (S Ultra, X9U IN guest, set
+# x9u-in-1105-sultra, session 146de99d). The set's ColorPanoramicSystemUI.apk
+# bound over SystemUI.apk (wallpaper AOD, above) has other dex than the image's,
+# so artd refused the image's oat/arm64/SystemUI.odex ("dex file checksum ...
+# does not match") and an older dalvik-cache odex too, and pm art dump said
+# arm64 [status=run-from-apk]: ColorOS SystemUI ran on JIT and the interpreter
+# in every session. Nothing compiled it, as the guest's background dexopt waits
+# for an idle, charging maintenance window that a session never has. The UI
+# activator runs this script in the guest once per session, in the background:
+# 60 s after sys.boot_completed (the boot is the hot moment, about 44 C skin) it
+# asks the guest's own ArtService to compile SystemUI with the guest's SystemUI
+# filter, only when it runs from the APK, verified only or in error. artd works
+# out the class loader context and boot image itself, and the odex goes to the
+# guest's /data/dalvik-cache (the staged one), so later sessions boot SystemUI
+# compiled. A success is remembered in /data/oneos_sysui_compiled under the
+# APK's sha256 and the boot image's size and time: those sessions skip the
+# check, and a new set file, an OTA or a rebuilt boot image compiles again. A
+# failure leaves no marker. SystemUI is not restarted for it: the compiled code
+# is used from its next start (the wallpaper AOD feature's screen-off restart in
+# oneos_panoramic_aod.sh, or the next session). Log: /data/oneos_sysui_compile.log
+# in the guest data. Every write is the guest script's, in the guest's mount
+# namespace. ColorOS guests only (oplus-services.jar); ONEOS_GUEST_SYSUI_COMPILE=0
+# leaves it out.
+rm -f "$STAGE/data/oneos_sysui_compile.sh"
+if [ "${ONEOS_GUEST_SYSUI_COMPILE:-1}" != 1 ]; then
+    echo "ColorOS SystemUI compile: off (ONEOS_GUEST_SYSUI_COMPILE=${ONEOS_GUEST_SYSUI_COMPILE:-})"
+elif [ -f "$ROOTFS/system/framework/oplus-services.jar" ]; then
+    cat > "$STAGE/data/oneos_sysui_compile.sh" <<'SYSUI'
+LOG=/data/oneos_sysui_compile.log
+MARK=/data/oneos_sysui_compiled
+APK=/system/system_ext/priv-app/SystemUI/SystemUI.apk
+[ -L "$LOG" ] && rm -f "$LOG"
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 32768 ]; then
+    tail -n 80 "$LOG" > "$LOG.new" && mv -f "$LOG.new" "$LOG"
+fi
+exec >>"$LOG" 2>&1
+log() { echo "$(date '+%m-%d %T') $*"; }
+# arm64 status of SystemUI's APK as ArtService reports it (run-from-apk, verify, speed, ...).
+status() { timeout 60 pm art dump com.android.systemui 2>/dev/null | sed -n 's/.*arm64: \[status=\([^]]*\)\].*/\1/p' | head -n 1; }
+compiled() { case "$1" in speed|speed-profile|everything|everything-profile) return 0 ;; esac; return 1; }
+remember() { rm -f "$MARK.new"; echo "$KEY" > "$MARK.new" && mv -f "$MARK.new" "$MARK"; }
+[ -f "$APK" ] || { log "no $APK: nothing to do"; exit 0; }
+n=0
+while [ "$(getprop sys.boot_completed)" != 1 ]; do
+    n=$((n + 1))
+    [ $n -lt 300 ] || { log "sys.boot_completed not 1 after 10 min: nothing done"; exit 0; }
+    sleep 2
+done
+sleep 60
+k=$(sha256sum "$APK" 2>/dev/null | cut -d' ' -f1)
+[ -n "$k" ] || k=$(stat -c 'size=%s,mtime=%Y' "$APK" 2>/dev/null)
+b=$(stat -c '%s:%Y' /data/misc/apexdata/com.android.art/dalvik-cache/arm64/boot.oat 2>/dev/null)
+KEY="apk=${k:-unknown} boot=${b:-image}"
+if [ -f "$MARK" ] && [ ! -L "$MARK" ] && [ "$(cat "$MARK" 2>/dev/null)" = "$KEY" ] &&
+        ls /data/dalvik-cache/arm64/*@SystemUI@SystemUI.apk@classes.dex >/dev/null 2>&1; then
+    log "SystemUI compiled on an earlier session for this APK ($KEY): skipped"
+    exit 0
+fi
+S=$(status)
+if compiled "$S"; then
+    remember
+    log "SystemUI arm64 is $S already: nothing to compile ($KEY)"
+    exit 0
+fi
+case "$S" in
+    run-from-apk|verify|error|extract) ;;
+    *) log "SystemUI arm64 status '${S:-not read}': not compiled"; exit 0 ;;
+esac
+f=$(getprop dalvik.vm.systemuicompilerfilter)
+f=${f:-speed}
+log "SystemUI arm64 is $S ($KEY): cmd package compile -m $f -f com.android.systemui"
+t0=$(date +%s)
+R=$(timeout 300 cmd package compile -m "$f" -f com.android.systemui 2>&1)
+rc=$?
+t=$(($(date +%s) - t0))
+A=$(status)
+log "result: $(echo "$R" | tail -n 1 | cut -c1-200) (exit $rc, $t s); SystemUI arm64 now ${A:-not read}"
+case "$A" in
+    ''|run-from-apk|error|extract) log "no marker: tried again next session" ;;
+    *) if [ $rc = 0 ] && echo "$R" | grep -q '^Success'; then
+           remember && log "marker saved: later sessions skip this until the APK or the boot image changes"
+       else
+           log "no marker: tried again next session"
+       fi ;;
+esac
+SYSUI
+    chmod 644 "$STAGE/data/oneos_sysui_compile.sh"
+    $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_sysui_compile.sh" 2>/dev/null || true
+    echo "ColorOS SystemUI compile: checked 60 s after the boot, once per SystemUI.apk (oneos_sysui_compile.log in the guest data)"
+else
+    echo "ColorOS SystemUI compile: not a ColorOS guest"
+fi
 
 # The guest's /data/misc/adb always exists, keys or not. ColorOS's (Android
 # 17) AdbDebuggingManager takes a missing directory as null key files and
