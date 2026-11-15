@@ -25,15 +25,28 @@ for d in $DIRS; do
     DEX="$(echo "$d" | sed 's/^smali_//; s/^smali$/classes/').dex"
     rm -rf "$W/dex" && mkdir -p "$W/dex"
     unzip -q -o "$W/rebuilt.jar" "$DEX" -d "$W/dex"
+    # apktool stamps the dex it rebuilds with the wall clock, so re-running this
+    # otherwise reproducible step (the dex bytes are deterministic) would change
+    # only that one zip entry's mtime and so the jar's sha256. Honour
+    # SOURCE_DATE_EPOCH (set it to pin a release jar's hash); unset, the dex keeps
+    # its build-time mtime as before.
     python3 - "$W/out.jar" "$W/dex/$DEX" "$DEX" <<'PY'
-import os, sys, zipfile
+import os, sys, time, zipfile
 jar, dex, name = sys.argv[1:4]
 tmp = jar + ".tmp"
+sde = os.environ.get("SOURCE_DATE_EPOCH")
 with zipfile.ZipFile(jar) as src, zipfile.ZipFile(tmp, "w") as dst:
     for entry in src.infolist():
         if entry.filename != name:
             dst.writestr(entry, src.read(entry.filename))
-    dst.write(dex, name, compress_type=zipfile.ZIP_STORED)
+    if sde:
+        zi = zipfile.ZipInfo.from_file(dex, name)
+        zi.date_time = time.gmtime(int(sde))[:6]  # UTC, so the pin is TZ-independent
+        zi.compress_type = zipfile.ZIP_STORED
+        with open(dex, "rb") as fh:
+            dst.writestr(zi, fh.read())
+    else:
+        dst.write(dex, name, compress_type=zipfile.ZIP_STORED)
 os.replace(tmp, jar)
 PY
     echo "replaced $DEX"
