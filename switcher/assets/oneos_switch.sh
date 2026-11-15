@@ -3381,13 +3381,22 @@ while true; do
             fi
 
             # ColorOS SystemUI compiled once per SystemUI.apk (S Ultra, X9U IN, session 146de99d: it ran
-            # from the APK in every session). guest_prepare.sh wrote the script for ColorOS guests; it waits
-            # for the boot and 60 s more in the background, so Home is never held up, and saves its marker
-            # and log in the guest data itself. Once per session: not again after a soft reboot of the guest.
+            # from the APK in every session). guest_prepare.sh wrote the script for ColorOS guests; it runs
+            # in the background, so Home is never held up, and saves its marker and log in the guest data
+            # itself. Its sys.boot_completed wait passes at once (properties are shared with One UI, whose
+            # value is already 1), so its 60 s count from this step. Once per session: not again after a
+            # soft reboot of the guest. Only with the guest's own artd (guest_prepare.sh touched
+            # oneos_guest_artd, review of the compile step; session 3d9814984612c525 had it and compiled
+            # in 9 s): with One UI's artd the dex2oat runs in init's namespace, outside the guest, so the
+            # return's kill loop would never stop it while it writes through the dalvik-cache bridge.
             if [ -z \"\$SYSUI\" ] && [ -f $STAGE/data/oneos_sysui_compile.sh ]; then
                 SYSUI=1
-                ( $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_sysui_compile.sh ) </dev/null >/dev/null 2>&1 &
-                echo '[UI Activator] SystemUI compile check started (oneos_sysui_compile.log in the guest data)'
+                if [ -f $STAGE/data/oneos_guest_artd ]; then
+                    ( $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_sysui_compile.sh ) </dev/null >/dev/null 2>&1 &
+                    echo '[UI Activator] SystemUI compile check started (oneos_sysui_compile.log in the guest data)'
+                else
+                    echo '[UI Activator] SystemUI compile skipped: no guest artd this session, One UI artd would run dex2oat outside the guest'
+                fi
             fi
 
             # Pixel Fold8 / Fold8 Ultra: start the system-UID sensor reader in the guest namespace

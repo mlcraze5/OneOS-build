@@ -4093,9 +4093,13 @@ echo "OPPO default grants: $([ -f "$STAGE/data/oneos_oplus_grants" ] && echo on 
 # arm64 [status=run-from-apk]: ColorOS SystemUI ran on JIT and the interpreter
 # in every session. Nothing compiled it, as the guest's background dexopt waits
 # for an idle, charging maintenance window that a session never has. The UI
-# activator runs this script in the guest once per session, in the background:
-# 60 s after sys.boot_completed (the boot is the hot moment, about 44 C skin) it
-# asks the guest's own ArtService to compile SystemUI with the guest's SystemUI
+# activator runs this script in the guest once per session, in the background,
+# and only when the guest has its own artd (oneos_guest_artd, below: with One
+# UI's the dex2oat would run outside the guest; review, session 3d9814984612c525).
+# Its sys.boot_completed wait passes at once, as properties are shared with One
+# UI, whose value is already 1, so the 60 s count from the activator's step,
+# late in the guest's boot (the boot is the hot moment, about 44 C skin). Then
+# it asks the guest's own ArtService to compile SystemUI with the guest's SystemUI
 # filter, only when it runs from the APK, verified only or in error. artd works
 # out the class loader context and boot image itself, and the odex goes to the
 # guest's /data/dalvik-cache (the staged one), so later sessions boot SystemUI
@@ -4127,6 +4131,7 @@ status() { timeout 60 pm art dump com.android.systemui 2>/dev/null | sed -n 's/.
 compiled() { case "$1" in speed|speed-profile|everything|everything-profile) return 0 ;; esac; return 1; }
 remember() { rm -f "$MARK.new"; echo "$KEY" > "$MARK.new" && mv -f "$MARK.new" "$MARK"; }
 [ -f "$APK" ] || { log "no $APK: nothing to do"; exit 0; }
+# Shared with One UI's properties, so already 1 in practice: the sleep 60 is the real wait.
 n=0
 while [ "$(getprop sys.boot_completed)" != 1 ]; do
     n=$((n + 1))
@@ -4173,7 +4178,7 @@ esac
 SYSUI
     chmod 644 "$STAGE/data/oneos_sysui_compile.sh"
     $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_sysui_compile.sh" 2>/dev/null || true
-    echo "ColorOS SystemUI compile: checked 60 s after the boot, once per SystemUI.apk (oneos_sysui_compile.log in the guest data)"
+    echo "ColorOS SystemUI compile: checked 60 s after the UI activator starts it (with the guest's own artd only), once per SystemUI.apk (oneos_sysui_compile.log in the guest data)"
 else
     echo "ColorOS SystemUI compile: not a ColorOS guest"
 fi
