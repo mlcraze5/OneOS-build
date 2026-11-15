@@ -3629,6 +3629,27 @@ if [ "$GMS_WANT" = 1 ]; then
 fi
 seed_settings "$GSET" settings_global $ADB_SEED auto_time=0 auto_time_zone=0 $PROV_GLOBAL launcher_support_card_no_padding=1
 [ -z "$PROV_SECURE" ] || seed_settings "$STAGE/data/system/users/0/settings_secure.xml" settings_secure $PROV_SECURE
+# ColorOS: unlocking the lock screen with a face or a fingerprint is the Secure
+# switch oplus_customize_face_unlock_switch / oplus_customize_fingerprint_unlock_switch,
+# and SystemUI (FaceSwitchHelper, FingerSwitchHelper) takes only 1 as on; unset
+# reads -1, off. ColorOS's own enroll flow sets it, but the guest enrolls nothing
+# (One UI's enrollments are carried across), so it stayed unset: Find X9 Ultra
+# IN, 2026-11-15, face unlock on the keyguard only worked once the "unlock with
+# face" switch in Settings was turned off and on again. Settings' own isChecked()
+# writes 1 the same way when the key is unset and something is enrolled. Only a
+# missing key is set, so a switch turned off in the guest stays off. Guest data
+# only; One UI's settings are not read or written.
+if [ -e "$ROOTFS/system/framework/oplus-services.jar" ] || [ -L "$ROOTFS/system/framework/oplus-services.jar" ]; then
+    BIO_SEED=""
+    for k in oplus_customize_face_unlock_switch oplus_customize_fingerprint_unlock_switch; do
+        if grep -q "name=\"$k\" " "$STAGE/data/system/users/0/settings_secure.xml" 2>/dev/null; then
+            echo "Guest settings_secure: $k already set, left as it is"
+        else
+            BIO_SEED="$BIO_SEED $k=1"
+        fi
+    done
+    [ -z "$BIO_SEED" ] || seed_settings "$STAGE/data/system/users/0/settings_secure.xml" settings_secure $BIO_SEED
+fi
 
 echo "=== 5.1 $(date +%T) settings seeded ==="
 # The switcher's return combo (hold Volume Up + Volume Down 3 s, read on the
