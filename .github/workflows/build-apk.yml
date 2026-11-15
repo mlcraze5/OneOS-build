@@ -29,24 +29,36 @@ jobs:
     steps:
       # The build reads no git metadata (versionName/versionCode are literals in
       # app/build.gradle.kts), so a shallow clone is enough.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
       # jvmToolchain = "21" (gradle/libs.versions.toml) and gradle.properties
       # forbids toolchain auto-download, so JDK 21 must be on the runner.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
-
+      # ubuntu-latest already carries an Android SDK (ANDROID_HOME) with
+      # cmdline-tools. android-actions/setup-android@v3 is not used: it always
+      # runs `sdkmanager tools`, which the runner's cmdline-tools 16.0 no
+      # longer knows ("Failed to find package 'tools'", run 43715769344).
       # compileSdk 37, and the build-tools AGP 9.4.1 defaults to.
       - name: Install Android SDK packages
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
+          set -eu
+          sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:?no Android SDK on the runner}}
+          sdkmanager=$sdk/cmdline-tools/latest/bin/sdkmanager
+          if [ ! -x "$sdkmanager" ]; then
+            sdkmanager=$(ls -d "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -n 1)
+          fi
+          [ -x "$sdkmanager" ] || { echo "no sdkmanager under $sdk/cmdline-tools" >&2; exit 1; }
+          echo "Using $sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
 
       - uses: gradle/actions/setup-gradle@v4
 
