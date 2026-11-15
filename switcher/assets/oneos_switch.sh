@@ -3625,8 +3625,7 @@ fi
 # Panel keeper (0.4.55). The guests OneOS pins at their top refresh rate (no
 # oplus-services.jar: Pixel, HyperOS, Nothing OS) could run a whole session with
 # the panel at 24 Hz under a SurfaceFlinger at 120 Hz: 10-15 fps (reports since
-# 0.4.38; guest_start.sh, oneos_sf_kick.sh). ColorOS and Infinity-X switch modes
-# themselves and came back to 120 Hz on their own. Every 15 s the panel's rate
+# 0.4.38; guest_start.sh, oneos_sf_kick.sh). Every 15 s the panel's rate
 # (/sys/class/lcd/panel/vrr, its first field) is read; under 48 Hz twice running
 # with a backlight on, the guest's /data/oneos_sf_kick.sh takes every display
 # through another mode back to its top one, which makes the composer program the
@@ -3634,40 +3633,69 @@ fi
 # only between kicks; it ends itself with the return (data/oneos_rec_stop) or
 # when the guest's namespace record is gone, like the heat cap. Logged in
 # $STAGE/panel_keeper.log. ONEOS_GUEST_SF_PIN=0: not started.
+# ColorOS was left out up to here ("this system sets its own refresh rate"), but
+# it does not always: S25 Ultra, ColorOS 17 coloros17-findx9u-in-1105, ~5 fps
+# from the start, the panel at 24 Hz at 20 s and 40 s and at 120 Hz only after
+# the camera was opened. It runs for ColorOS too, with the same thresholds; the
+# kick there ends on DisplayManager's own mode and range and releases the
+# backdoor pin (guest_start.sh), so OplusRefreshRateService's later choices (60
+# Hz in some apps and games, battery saver) still reach SurfaceFlinger. ColorOS
+# users saw the lag from the start, so there one check also runs 5 s after the
+# guest's sys.boot_completed (props are shared; cleared to 0 before the guest
+# started) and kicks at once on a panel under 48 Hz with a backlight on.
+# ONEOS_GUEST_OPLUS_PANEL_KEEPER=0: not started for ColorOS.
 rm -f "$STAGE/panel_keeper.log"
-if [ "$GUEST_OPLUS" != 1 ] && [ "${ONEOS_GUEST_SF_PIN:-1}" != 0 ] && [ -r /sys/class/lcd/panel/vrr ]; then
+if [ "${ONEOS_GUEST_SF_PIN:-1}" != 0 ] && [ -r /sys/class/lcd/panel/vrr ] &&
+    { [ "$GUEST_OPLUS" != 1 ] || [ "${ONEOS_GUEST_OPLUS_PANEL_KEEPER:-1}" != 0 ]; }; then
     $BB sh -c "
     : oneos_panel_keeper
     echo \$\$ > /sys/fs/cgroup/cgroup.procs 2>/dev/null
     F=$STAGE/panel_keeper.log
-    echo \"# \$(date) OneOS panel keeper: every 15 s; under 48 Hz twice with the screen on, oneos_sf_kick.sh\" > \$F
-    low=0; kicks=0
-    while true; do
-        if [ -f $STAGE/data/oneos_rec_stop ] || [ ! -s $STAGE/guest_mntns ]; then
-            echo \"# \$(date +%T) stopped (the return started, or no guest namespace record) after \$kicks kicks\" >> \$F
-            exit 0
-        fi
+    echo \"# \$(date) OneOS panel keeper: every 15 s; under 48 Hz twice with the screen on, oneos_sf_kick.sh$([ "$GUEST_OPLUS" = 1 ] && echo "; once 5 s after boot")\" > \$F
+    low=0; kicks=0; early=$GUEST_OPLUS; waited=0
+    reading() {
         hz=\$(cut -d' ' -f1 /sys/class/lcd/panel/vrr 2>/dev/null)
         case \"\$hz\" in ''|*[!0-9]*) hz=0 ;; esac
         on=0
         for b in /sys/class/backlight/*/brightness; do
             v=\$(cat \$b 2>/dev/null); case \"\$v\" in ''|*[!0-9]*) ;; 0) ;; *) on=1 ;; esac
         done
-        if [ \$on = 1 ] && [ \$hz -gt 0 ] && [ \$hz -lt 48 ]; then low=\$((low + 1)); else low=0; fi
-        if [ \$low -ge 2 ] && [ \$kicks -lt 40 ] && [ -f $STAGE/data/oneos_sf_kick.sh ]; then
-            P=\$(pidof system_server | awk '{print \$1}')
-            out=''
-            [ -n \"\$P\" ] && out=\$(timeout 30 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_sf_kick.sh 2>&1 | tr '\\n' ';' | cut -c1-400)
-            kicks=\$((kicks + 1)); low=0
-            sleep 1
-            echo \"\$(date +%T) panel at \$hz Hz with the screen on: \${out:-no guest system_server}; now \$(cut -d' ' -f1 /sys/class/lcd/panel/vrr 2>/dev/null) Hz\" >> \$F
+    }
+    kick() {
+        [ -f $STAGE/data/oneos_sf_kick.sh ] || return 0
+        P=\$(pidof system_server | awk '{print \$1}')
+        out=''
+        [ -n \"\$P\" ] && out=\$(timeout 30 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_sf_kick.sh 2>&1 | tr '\\n' ';' | cut -c1-600)
+        kicks=\$((kicks + 1)); low=0
+        sleep 1
+        echo \"\$(date +%T) panel at \$hz Hz with the screen on\$1: \${out:-no guest system_server}; now \$(cut -d' ' -f1 /sys/class/lcd/panel/vrr 2>/dev/null) Hz\" >> \$F
+    }
+    while true; do
+        if [ -f $STAGE/data/oneos_rec_stop ] || [ ! -s $STAGE/guest_mntns ]; then
+            echo \"# \$(date +%T) stopped (the return started, or no guest namespace record) after \$kicks kicks\" >> \$F
+            exit 0
         fi
+        if [ \$early = 1 ]; then
+            if [ \"\$(getprop sys.boot_completed)\" = 1 ]; then
+                early=0
+                sleep 5
+                reading
+                if [ \$on = 1 ] && [ \$hz -gt 0 ] && [ \$hz -lt 48 ]; then kick ' after boot'
+                else echo \"\$(date +%T) after boot: panel at \$hz Hz, backlight on=\$on; left alone\" >> \$F; fi
+            else
+                waited=\$((waited + 3)); [ \$waited -lt 600 ] || early=0
+                sleep 3; continue
+            fi
+        fi
+        reading
+        if [ \$on = 1 ] && [ \$hz -gt 0 ] && [ \$hz -lt 48 ]; then low=\$((low + 1)); else low=0; fi
+        if [ \$low -ge 2 ] && [ \$kicks -lt 40 ]; then kick ''; fi
         sleep 15
     done
 " </dev/null >/dev/null 2>&1 &
-    echo "Panel keeper: on (every 15 s to $STAGE/panel_keeper.log)"
+    echo "Panel keeper: on ($([ "$GUEST_OPLUS" = 1 ] && echo "ColorOS: mode bounce without a pin, once after boot and" || echo "pinned guest:") every 15 s to $STAGE/panel_keeper.log)"
 else
-    echo "Panel keeper: off ($([ "$GUEST_OPLUS" = 1 ] && echo "this system sets its own refresh rate" || echo "no /sys/class/lcd/panel/vrr, or ONEOS_GUEST_SF_PIN=0"))"
+    echo "Panel keeper: off (no /sys/class/lcd/panel/vrr, ONEOS_GUEST_SF_PIN=0$([ "$GUEST_OPLUS" = 1 ] && echo " or ONEOS_GUEST_OPLUS_PANEL_KEEPER=0"))"
 fi
 
 # OneOS dead-man switch. If the guest is not booting, put One UI back by itself:

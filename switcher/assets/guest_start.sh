@@ -560,9 +560,29 @@ fi
 # left alone"), so Pixel on the Fold dropped to 1 Hz whenever the screen was
 # still (session 9455098f: 27 times in 6 minutes, up to 4 s; freezes, flicker
 # on touch).
+# ColorOS (oplus-services.jar) was left out on the belief that its own VRR
+# policy reprograms the panel. It does not always: S25 Ultra, ColorOS 17
+# coloros17-findx9u-in-1105, ~5 fps from the start of the session, the panel at
+# 24 Hz (LFD 10-24 Hz) at 20 s and 40 s while OplusVrrScenePolicy and
+# SurfaceFlinger asked for [120, 120] and took it as done; 120 Hz (LFD 10-120)
+# only after the camera's 60 Hz app request made a real mode switch. So on
+# ColorOS the kick does the same bounce but leaves no pin: the last call puts
+# back the mode and primary range DisplayManager (that is ColorOS's
+# OplusRefreshRateService, games, battery saver) had set, read from the dump
+# before the bounce, and then one more 1035 with a mode id no display has.
+# SurfaceFlinger sets its backdoor flag from that call's result
+# (mDebugDisplayModeSetByBackdoor = result == NO_ERROR), so the failed call
+# clears it and ColorOS's next setDesiredDisplayModeSpecs is applied again.
+# The 1035 pin is needed only because it is the one way from a shell to make
+# SurfaceFlinger switch modes; it lasts under a second. Until ColorOS's next
+# request its app-request range is the restored primary range. The flag is
+# logged after the release.
 cat > /data/oneos_sf_kick.sh <<'SFKICK'
 # OneOS (guest_start.sh): every physical display through another mode back to its top mode, pinned there.
+# ColorOS (oplus-services.jar): back to DisplayManager's own mode and range, and the pin released.
+OPLUS=0; [ -e /system/framework/oplus-services.jar ] && OPLUS=1
 D=$(dumpsys SurfaceFlinger 2>/dev/null)
+last=''
 n=0
 for id in $(dumpsys SurfaceFlinger --display-id 2>/dev/null | sed -n 's/^Display \([0-9][0-9]*\) (HWC display .*/\1/p'); do
     sel=$(echo "$D" | awk -v d="$id" '$0 == "Display " d { f = 1; next } f && /^Display / { f = 0 }
@@ -577,17 +597,43 @@ for id in $(dumpsys SurfaceFlinger --display-id 2>/dev/null | sed -n 's/^Display
             if (b >= 0) print b, bv, o, ov }')
     set -- $sel
     [ $# = 4 ] || { echo "display $id: no modes in the dump, left alone"; continue; }
+    # ColorOS: DisplayManager's policy from the dump ("defaultModeId=2, ...
+    # primaryRanges={physical=[..], render=[120.00Hz, 120.00Hz]}"): its mode and
+    # render range, or the top mode at its rate when it cannot be read.
+    tm=$1; tlo=$2; thi=$2
+    if [ $OPLUS = 1 ]; then
+        pol=$(echo "$D" | awk -v d="$id" '$0 == "Display " d { f = 1; next } f && /^Display / { f = 0 }
+            f && /displayManagerPolicy=/ { print; exit }')
+        pm=$(echo "$pol" | sed -n 's/.*defaultModeId=\([0-9][0-9]*\).*/\1/p')
+        pr=$(echo "$pol" | sed -n 's/.*primaryRanges={[^}]*render=\[\([0-9.]*\)Hz, \([0-9.]*\)Hz\].*/\1 \2/p')
+        if [ -n "$pm" ] && [ -n "$pr" ]; then tm=$pm; tlo=${pr%% *}; thi=${pr##* }; fi
+        # DisplayManager on the other mode (a 60 Hz choice): through the top one instead.
+        [ "$tm" = "$3" ] && set -- "$1" "$2" "$1" "$2"
+    fi
     # Each call waits on SurfaceFlinger's main thread: never longer than 5 s.
     [ "$3" = -1 ] || { timeout 5 service call SurfaceFlinger 1035 i32 "$3" i64 "$id" f "$4" f "$4" >/dev/null 2>&1; sleep 0.4; }
-    r=$(timeout 5 service call SurfaceFlinger 1035 i32 "$1" i64 "$id" f "$2" f "$2" 2>&1 | tr -s ' \n' ' ' | cut -c1-120)
-    echo "display $id: through mode $3 ($4 Hz) to mode $1, pinned at $2 Hz: $r"
-    n=$((n + 1))
+    r=$(timeout 5 service call SurfaceFlinger 1035 i32 "$tm" i64 "$id" f "$tlo" f "$thi" 2>&1 | tr -s ' \n' ' ' | cut -c1-120)
+    if [ $OPLUS = 1 ] && [ "$tm:$tlo:$thi" != "$1:$2:$2" ] && ! echo "$r" | grep -q 'Parcel(00000000'; then
+        # Not taken (a range it refuses): never leave the display on the bounce mode.
+        r="$r; top: $(timeout 5 service call SurfaceFlinger 1035 i32 "$1" i64 "$id" f "$2" f "$2" 2>&1 | tr -s ' \n' ' ' | cut -c1-120)"
+    fi
+    if [ $OPLUS = 1 ]; then
+        echo "display $id: through mode $3 ($4 Hz) to DisplayManager's mode $tm at $tlo-$thi Hz: $r"
+    else
+        echo "display $id: through mode $3 ($4 Hz) to mode $1, pinned at $2 Hz: $r"
+    fi
+    last=$id; n=$((n + 1))
 done
 [ "$n" -gt 0 ] || echo "no physical displays listed yet"
+if [ $OPLUS = 1 ] && [ -n "$last" ]; then
+    # The flag is one for all displays: one failing call (no mode 2147483647) clears it.
+    timeout 5 service call SurfaceFlinger 1035 i32 2147483647 i64 "$last" f 0 f 0 >/dev/null 2>&1
+    echo "pin released: $(dumpsys SurfaceFlinger 2>/dev/null | grep -m 1 -o 'debugDisplayModeSetByBackdoor[=:] *[a-z0-9]*' || echo 'no backdoor flag in the dump')"
+fi
 SFKICK
 chmod 644 /data/oneos_sf_kick.sh
 if [ -e /system/framework/oplus-services.jar ]; then
-    :
+    echo "[Pivoted Root] SF render rate left to ColorOS (oneos_switch.sh's panel keeper bounces the modes, unpinned, if the panel sticks under 48 Hz)"
 elif [ "${ONEOS_GUEST_SF_PIN:-1}" = 0 ]; then
     echo "[Pivoted Root] SF render rate left to DisplayManager (ONEOS_GUEST_SF_PIN=0)"
 else
