@@ -565,6 +565,19 @@ android {
     }
 
     signingConfigs {
+        // CI (.github/workflows/build-apk.yml) decodes the DEBUG_KEYSTORE_B64 secret
+        // to ONEOS_DEBUG_KEYSTORE. Point debug signing at it explicitly: leaving it to
+        // AGP's default ~/.android/debug.keystore still gave every run its own signer
+        // (runs 43736112838 and before), so CI builds could not update each other.
+        // Without the variable local builds keep AGP's default debug key.
+        System.getenv("ONEOS_DEBUG_KEYSTORE")?.let(::File)?.takeIf { it.isFile }?.let { ks ->
+            getByName("debug") {
+                storeFile = ks
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
         if (releaseKeys != null) {
             create("release") {
                 storeFile = file(releaseKeys.getProperty("storeFile"))
@@ -576,6 +589,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             // What friends get: not debuggable, signed with the OneOS release key.
             isMinifyEnabled = false

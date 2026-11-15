@@ -63,8 +63,12 @@ jobs:
       # Each runner makes a fresh ~/.android/debug.keystore, so every run's APK
       # had a different signer and could not be installed over the previous
       # build. With the repository secret DEBUG_KEYSTORE_B64 (base64 of a debug
-      # keystore: store/key password `android`, alias `androiddebugkey`, what
-      # AGP's default debug signing config expects) every run signs with that key.
+      # keystore: store/key password `android`, alias `androiddebugkey`) every
+      # run signs with that key. Writing it to ~/.android/debug.keystore alone
+      # was not enough: run 43736112838 decoded the right key there and AGP
+      # still signed with another one. So the key also goes to a fixed path,
+      # exported as ONEOS_DEBUG_KEYSTORE, which app/ and guest/build.gradle.kts
+      # set as the debug signing config's storeFile.
       - name: Install debug keystore
         env:
           DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
@@ -76,14 +80,20 @@ jobs:
             echo "> $msg" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          ks=$HOME/.android/debug.keystore
-          mkdir -p "$HOME/.android"
+          ks=$RUNNER_TEMP/oneos-debug.keystore
           printf '%s' "$DEBUG_KEYSTORE_B64" | base64 -d > "$ks"
           chmod 600 "$ks"
-          fp=$(keytool -list -v -keystore "$ks" -storepass android | grep SHA256 | head -n 1 | sed 's/^[[:space:]]*//')
-          [ -n "$fp" ] || { echo "no SHA256 fingerprint in $ks" >&2; exit 1; }
-          echo "Debug keystore: $fp"
+          mkdir -p "$HOME/.android"
+          cp "$ks" "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+          fp=$(keytool -list -v -keystore "$ks" -storepass android -alias androiddebugkey | grep 'SHA256:' | head -n 1 | sed 's/^[[:space:]]*SHA256:[[:space:]]*//')
+          [ -n "$fp" ] || { echo "no SHA256 fingerprint for androiddebugkey in $ks" >&2; exit 1; }
+          echo "Debug keystore: SHA256: $fp"
           echo "Debug keystore certificate: \`$fp\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "ONEOS_DEBUG_KEYSTORE=$ks" >> "$GITHUB_ENV"
+          # Lowercase hex without colons, as apksigner prints it; checked against
+          # the APK's signer after the build.
+          echo "ONEOS_DEBUG_KEYSTORE_SHA256=$(printf '%s' "$fp" | tr -d ':' | tr 'A-F' 'a-f')" >> "$GITHUB_ENV"
 
       - uses: gradle/actions/setup-gradle@v5
 
@@ -124,6 +134,7 @@ jobs:
           vname=$(printf '%s\n' "$badging" | sed -n "s/.* versionName='\([^']*\)'.*/\1/p")
           vcode=$(printf '%s\n' "$badging" | sed -n "s/.* versionCode='\([^']*\)'.*/\1/p")
           echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          signer=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" 2>/dev/null | grep -m1 'certificate SHA-256 digest' | sed 's/.*: //' | tr 'A-F' 'a-f' || true)
           {
             echo "### OneOS debug APK"
             echo ""
@@ -135,11 +146,19 @@ jobs:
             echo "| sha256 | \`$sha\` |"
             # Same value on every run when DEBUG_KEYSTORE_B64 is set; compare it
             # with the installed build's signer before updating over it.
-            signer=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" 2>/dev/null | grep -m1 'SHA-256 digest' | sed 's/.*: //' || true)
             if [ -n "$signer" ]; then
               echo "| signer SHA-256 | \`$signer\` |"
             fi
+            if [ -n "${ONEOS_DEBUG_KEYSTORE_SHA256:-}" ]; then
+              echo "| keystore SHA-256 | \`$ONEOS_DEBUG_KEYSTORE_SHA256\` |"
+            fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
+          # With the secret set, an APK signed by any other key is the bug this
+          # check exists for (run 43736112838): fail instead of uploading it.
+          if [ -n "${ONEOS_DEBUG_KEYSTORE_SHA256:-}" ] && [ "$signer" != "$ONEOS_DEBUG_KEYSTORE_SHA256" ]; then
+            echo "::error::$name is signed by ${signer:-<no signer>}, not the DEBUG_KEYSTORE_B64 key $ONEOS_DEBUG_KEYSTORE_SHA256"
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v6
         with:
