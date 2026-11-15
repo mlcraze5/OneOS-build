@@ -173,10 +173,9 @@
 6d19e2a1b3d2f9114d6dd1a8923e13b738be146bd6681bd3b66da29c7067988c gh:sets-1,sf,1CJ8abq1PVQtqNp1NLa-TVUozaPYkw6Bb,1clgTbzx8y73IzJKKzMw6YpPY8VaPNojc,18pCz5PptSzkxepAVULU_SC93OjKqifk_,1niUkqPAyj0SWRVxZPQHO43z3j-LllNA2,1iFuvD92URM3imk9oJUNSCJ8_YBqc4Fkf,1W5LxUdPbvnnqjhcqUsQ7n9eF2K0xT1gx
 6d87042a95a7b93d668090f41721369feb2d7957ade85f9bfb80c4f5df9cfdef gh:sets-1,sf,1V4-vqri23oB2tIB4c4sxwyg4zqwJoxjZ,1vPObfXQYwdc7obbm0S9Whd9bj1pcAxvX,1ETTyY8YHgMZJhdx00EB2D03HdysouFzb,1rYl1O7z2NnVz63YAKSP8xyoUnNUpoSAl,1p3nXDvSKU1GSI_ywQpVvOrjXXWfnoWa9,1r6S-OzM_iJU60MNhAEfJWKwytH9GqEk6
 # The merged SystemUI (fingerprint wave + wallpaper AOD) for x9u-in-1105-sultra, rebuilt
-# with scripts/make-coloros-wave-set.sh (apktool 2.9.3) on the stock SystemUI 620aff68…. Local
-# only until the branch's release asset is published; test builds pre-place it in the app cache
-# (files/oneos-files/<sha256>).
-6dc4599182c50d2994ca1fd8ccb9f10f6f8fd1732bb2e0374f51cc1ef2aa20d6 1OneOSLocalMergedPanoramicWaveGlyph1105
+# with scripts/make-coloros-wave-set.sh (apktool 2.9.3) on the stock SystemUI 620aff68…. An
+# asset of the mlcraze5/OneOS-build release coloros-1105-r3, named by its sha256.
+6dc4599182c50d2994ca1fd8ccb9f10f6f8fd1732bb2e0374f51cc1ef2aa20d6 gh:mlcraze5/OneOS-build:coloros-1105-r3
 6f1bf734e440882fa0d204590c05da8bc5d1f21a458832e1da414f06da1dce9e gh:sets-1,sf,1au3y2LZ-1lhDeTnNqkgcJ2pcvO4fgL2a,15_MyOqk8f4FHTvakck5LHtrdxeZxgdp0,1XDGf3isI67JXODVGfI26YLX-4ruYKwM5,1ZeqcFmuyyLNgI536wjg6ym7RQkTD1KLQ,16dV0xFjB3yLHYkkPGF4sMo0fz1SdD_QL,1enxt-sNIMY9-_efHafE7v0nLBEwZm0i-
 6f676fb813f4ba7ca2ff14ad00d6861d8d31cd882cc63013920e725ef1a1a3e1 gh:sets-1,sf,1xpo5otdvisgrKD9qoAkPl6O6PqzzsNgs,1-dN2KC5ymgmxytOg1AM8bFs2tx0cQKmH,1M9s73luCv4M4XljyoDb1e2pU3Ej0QRel,1y6NDPoDPvjylSDDwxdDef8iUfISrSYNE,1SYgbt1iS_YL9cbGGZ56imwydFP3Iu_02,1Rvp13tniH_4SCl0BLFZB8Q5-7CvCCJXP
 6f6ace3a11cd8a639af72f5f6a4098b6b828673e3ca616585b6850942ce4abca gh:sets-1,sf,1HuU4kvtQG914d9UeGdv7s4VHkUjkZIFw,12oBcwfd1of_fqpdf18NrTH3T_fXDu0Wn,1hXQOAeKJsY_kY-40cW-wnPO2siaEPLsw,1Kjw41dMU9kPZwOKSbacgUsSTt0KyjNXe,1hTFFxP2ASKPioT6QPEa2D19lfHtt3GCB,1zN6J9ZmxVGuWKL5pOt-aBmXpvh_Lv0Ae
@@ -290,9 +289,9 @@ bc35bc674191d700f19619acda110edb9547fb7bb860036b8ac6a46fc34d4b93 gh:sets-1,sf,17
 bd03c424877de86c2864313ba3371d3725b3d5531559373aadc84d592f9cae0c gh:sets-1,sf,1pI-m5yEGgSuqN-BWHtjyM0IckKMBvl-z,1WkHYXUvJycDwbzerubiRr-Sfm9bL70I_,1EKVXvjt6e7E-SRqoOVkuWwyySwDseq8G,18H4awQuF1jeoELtEanHUg5tE-nqC5Vmo,195XP8aibkSFeN6mnTk6qaTodsl27yWM3,1zZ5kuiRF1eoebnVlaxhonCIqXkTmXAUp
 bd990391b7af3c465e4b87672ca6345ab0a7ad54a5cfbb55df26bf696fdb2211 gh:sets-1,sf,1tZF775AnJ7GOh9Q_m00LP_QEZRNMRt4a,1q_ZjxrOZv8_hb3EoqROO5JPBiMhG-4UF,1Tokbx3FciWrXiW8QpmwU7bAF1JV0RL_Z,1z0NuTGk-IJdR1xcTIesNgZUxcIrdsq0O,1L4Ul_PEk9-efSBwG8TUkOkhIHlFngTmh,1Z396e6G_nffAcoy2LQT5HaJtMFnCWbv0
 # The r3 guards.txt for x9u-in-1105-sultra: services_patched.jar re-pinned and "biowrites" added to
-# the guard-word header line. Local only until the branch's release asset is published; test builds
-# pre-place it in the app cache (files/oneos-files/<sha256>).
-bdef300e7bdf05c4b51c2c9fecf79a19f8a93524a06e0c647e285967eb88007d 1OneOSLocalGuards1105Biowrites
+# the guard-word header line. An asset of the mlcraze5/OneOS-build release coloros-1105-r3, named
+# by its sha256.
+bdef300e7bdf05c4b51c2c9fecf79a19f8a93524a06e0c647e285967eb88007d gh:mlcraze5/OneOS-build:coloros-1105-r3
 bdfa0709054f5b23b1a80d064e4cf3fc32f751d81fd7fe11f53878da7426e856 gh:sets-1,sf,19WjQk4pYRz3dyt4JnvEIlGhdWMIZDQJ-,1NFfnJSUx8p5azdyVcSQb_VOfG6C3namB,1hc9FGn8cPzFWVifFhBK7ass47phnaUeC,1tuoDdNQVkk-8NkCe4mqlTXhqPiyri4AB,1Cg8KPmNYAAsz20UM4bVHJu8fQzx4eh4Q,1iPQQs59_py6BQKGLLrPW7FXuBe8tuHIc
 be3a4156daeadb2abd6601844feed14ca6e7180d50cef564044c4071923eab7a gh:sets-1,sf,1nqleMHUfhBWZAw2_XPquPctJ_XeStalh,1S0joaYpNtZJLDl1Vl1LJM60oyM42QItk,1d_57pz4KiwTL6cmWqPdVYzyxuinCGU_I,1XP3hYEUTZVa1F7NS_pa7Wma7-Q548V0k,1e0gnB8cLF-H_J56R_nP-F2CqJEPSdNxy,17OnJg3ScmIrchBK2IsJ2ugUB2ohxu9Pu
 befe6c9a7ea411faa5342ccccda67da050f50a05505d98adfbaf0bb22390aa57 gh:sets-1,sf,16nnmfR17JkiCcevJ9copt03bZ7clJfAr,1-5nXxqEeOXkxugYj9AK8F5qSNsNSKyWb,1sYyKhObLNxT09UiZGO7Dw5EssAzyqSik,19lqZsAxhtM0gbrVu_SorTUoSDsCv70Mf,1twwOmJ5mEWXED9oh49iBir6er-4UXyRr,1ZTUrbjronhxH-D339NnazIr_Wy-_pXl1
@@ -342,9 +341,9 @@ dd8dd59514fb4718a3f331ff54a5614cd7162320713e95cae445a46349b603af gh:sets-1,sf,18
 dddccf843beb0fb4552d3f0afe1c4f8bb8d7a1c4269f5a787f16ad1b08f8beaf gh:sets-1,sf,1Ajqz5FgwxP2Q10L7w30aHtnTzU0g2FqW,18iLXNrRdbRNi37hV4qsa1ZnBa4-38ZwW,1YAmnRfqeGVASevdUurpNpc5hHAS4ofUw,1VEVOgyHU1QidOJXqh3Svn0_HiuhRU4XK,1sTRz1qi9o8gqw6mFZQAwK0RUdKe1zuUn,1IYciqPtdP0XxtqTBioG1hWSS4kUbnv_2
 # The r3 services_patched.jar for x9u-in-1105-sultra: r2's guard jar also patched by
 # patches/guest_no_biometric_writes.py (the guest's four fingerprint and face enroll and removal
-# clients fail at their entry before Samsung's HAL). Local only until the branch's release asset is
-# published; test builds pre-place it in the app cache (files/oneos-files/<sha256>).
-de4f9d9ed6efc492e43272e9d848de73f06b0393a682499b1dea8ac98ce9adf9 1OneOSLocalServices1105Biowrites
+# clients fail at their entry before Samsung's HAL). An asset of the mlcraze5/OneOS-build release
+# coloros-1105-r3, named by its sha256.
+de4f9d9ed6efc492e43272e9d848de73f06b0393a682499b1dea8ac98ce9adf9 gh:mlcraze5/OneOS-build:coloros-1105-r3
 df022f38076fc607c9be71da62d19dd1459efcc0193d808855f37785d83406e2 gh:sets-1,sf,1zTsJTxPDzK_CthVdY4QgvwZssrodLa5z,1d0CPMMZVRRnzgdVdTUygTVnILu6os7jC,1c7bF1tFVO0LdJX2BP6tXWZzRKXfbgKjF,1sv6xQ6zexZjEz93_8uXy9z4ZFxPdHyDI,1MK0eCCU_nU7MkvZzFh4Acqot_3OszVdN,1-ocpk1BHPzZNgC8a1Z02sO26F2C_UQRI
 df141e3656cbbe576a98975cdd17327f7e4a7dc671a1725c504886ebf5009a05 gh:sets-1,sf,1lGqtKCI2cGUX7-XZWblb2UKKtMLCx8Dn,1dpDkNfZd0V8GsJdaLEuIaoKixdtxUBvk,1g7Feirk19JdAxLMIl1Pe0xMvSG_jhWdj,1v3oh4Tyykv9nQ6c1U2afedSSKCVWDRvK,1lTtOB_6sSqX2PoctFhz6Q8yGTkF70hXB,1jmAMOtnxTbWB1ndKBNhgyhumfPlBY-Rs
 e0c49883974c10f5601950c0f54c3da29658dda1ce17c08c5af1364bbd31bdd8 gh:sets-1,sf,1f6ntp8JlN0qCumEwMedWl274c_qhAfnk,1vUKmZ8fDB9N7CcHJptOZAOeVvaWEwgg4,1jyO_Az2isz2-yY5-p7kRPPnNgNOhNAoJ,1KfHYa-g5E3iAvYpf6O1L_WpOb0jbzAEC,17M40UDABfgvZZ4GD-vZz_-ywYMx3IWOf,1bPRH3sBhRk76qXS10Bo_FDBQHf1QlIQ3
@@ -398,8 +397,8 @@ ff76a847b4bce02e9e0b8f1bbe6efb3e37ede930717adf9cd2730ea5fb7186e4 gh:sets-1,sf,1Z
 ffbafbf7336e69aa9e06e4918afd3956055e8b796f1b7a3b428e78ca06a3905a gh:sets-1,sf,1jGKrnxDPI1r3XLZmAHNwkPl4ZQ9gx0E4,1ZYdWOVSLoLb9n_KkN8qbD_9nOP8eagj_,1efVOMikPcW4UPECU-kLKsNcA470bMtIf,14O8Xm6nrrcsMQ0mKV8RaDG1QSZgjQkoS,1ntqU4qhX4L5Vuh3umK1g1DnFLKUE_RjZ,1Z4ymmXr8jeasmY0Bqr7opL81TcE4DozY
 # The fingerprint wave. d1caea92 and 95cd0d are on the pin-fixes-0.4.92 release. The
 # November image's classes3.dex (02fc1190, the wake-glyph build, rebuilt from the repo's patch
-# with apktool 2.9.3 on the stock SystemUI 620aff68…) is local only until pin-fixes-0.5.09
-# carries it; test builds pre-place it in the app cache.
-02fc1190a70242de56b6321d47b39800789167629a56c501ee2f1c5edaec59e3 1OneOSLocalWaveDex1105Glyph02fc1190
+# with apktool 2.9.3 on the stock SystemUI 620aff68…) is an asset of the mlcraze5/OneOS-build
+# release coloros-1105-r3.
+02fc1190a70242de56b6321d47b39800789167629a56c501ee2f1c5edaec59e3 gh:mlcraze5/OneOS-build:coloros-1105-r3
 d1caea92b132bf2a56a59e44fcb2ed385d4fe4ab8b173845ff7cad1ed92c460a gh:vdcoolok/OneOS:pin-fixes-0.4.92
 95cd0d4811c1a1c12d5ec3cf60995e2db3947a8d3303788baa3cdf2b20ce039a gh:vdcoolok/OneOS:pin-fixes-0.4.92
