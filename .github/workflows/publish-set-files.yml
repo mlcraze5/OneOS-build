@@ -1,0 +1,207 @@
+# Rebuilds x9u-in-1105-sultra's four local-only set files from public sources
+# inside the runner, checks each against the hash pinned in
+# app-android/packages/x9u-in-1105-sultra.sha256, and only if all four match
+# publishes them as a release whose assets are named by their SHA-256 (the names
+# the OneOS app downloads them under; SetDownloader.url()). The owner runs this
+# by hand from the Actions tab: pressing "Run workflow" is the publication. There
+# is no push or schedule trigger, so nothing here publishes on its own.
+name: Publish set files
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish the assets under (the app's gh:<tag> source)."
+        required: true
+        default: "coloros-1105-r3"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      # The set this workflow rebuilds and where its pins live.
+      SET_ID: x9u-in-1105-sultra
+      SHAFILE: app-android/packages/x9u-in-1105-sultra.sha256
+      # apktool 2.9.3 (iBotPeaches), the version the pinned files were built with.
+      APKTOOL_URL: "https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar"
+      APKTOOL_SHA: "7956eb04194300ce0d0a84ad18771eebc94b89fb8d1ddcce8ea4c056818646f4"
+      # ColorOS 17 Find X9 Ultra IN 1105 image: the gzip streams to the runner's
+      # /mnt temp disk and gunzips to this ext4 /system image.
+      IMG_URL: "https://sourceforge.net/projects/oneos-mirror/files/images/OneOS_ColorOS17_FindX9Ultra_IN_1105.img.gz/download"
+      IMG_SHA: "6c089f2d043d60f34b40dd58ad44f88621163163c1664121753311a115da8d7c"
+      # Stock SystemUI.apk inside that image, the wave set's input.
+      STOCK_SYSTEMUI_SHA: "620aff68496e4d3cade8d4358a01e0b19666268a3234f8dae6c330a252f3fe8c"
+      # services_patched.jar is r2's jar re-patched; this is r2's jar, a public
+      # asset of fahadalijaved/OneOS-files (gh:sets-1 in remote.txt).
+      R2_JAR_SHA: "5e361d3aeeaf4d70705c2eaa626d44e61f5d3b12a296713b38886f3263f69b9f"
+      R2_JAR_URL: "https://github.com/fahadalijaved/OneOS-files/releases/download/sets-1/5e361d3aeeaf4d70705c2eaa626d44e61f5d3b12a296713b38886f3263f69b9f"
+      # apktool 2.9.3 stamps the dex it rebuilds with the wall clock, so
+      # patch-built-jar.sh pins that one zip entry's mtime from SOURCE_DATE_EPOCH.
+      # This is the r3 jar's build instant (2026-11-15 12:51:46 UTC); it is what
+      # makes services_patched.jar rebuild to the published de4f9d9e… byte for byte.
+      SOURCE_DATE_EPOCH_SERVICES: "1794747106"
+      # The committed guards.txt (a plain file in the repo), copied as the fourth.
+      GUARDS_SRC: "app-android/packages/set-files/x9u-in-1105-sultra/guards.txt"
+    steps:
+      - name: Validate tag input
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # Same shape SetDownloader.url() and build.gradle.kts require of a gh:<tag>.
+          if ! printf '%s' "$TAG" | grep -Eq '^[a-z0-9][a-z0-9.-]{0,39}$'; then
+            echo "::error::tag '$TAG' is not ^[a-z0-9][a-z0-9.-]{0,39}\$" >&2
+            exit 1
+          fi
+          echo "Publishing under tag: $TAG"
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      # jvmToolchain 21; temurin 21 runs apktool 2.9.3 and is the JDK the local
+      # reproduction used.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # Build-tools give zipalign (apktool b) and aapt2; same SDK approach as
+      # build-apk.yml: use the runner's own Android SDK, don't sdkmanager "tools".
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:?no Android SDK on the runner}}
+          sdkmanager=$sdk/cmdline-tools/latest/bin/sdkmanager
+          if [ ! -x "$sdkmanager" ]; then
+            sdkmanager=$(ls -d "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -n 1)
+          fi
+          [ -x "$sdkmanager" ] || { echo "no sdkmanager under $sdk/cmdline-tools" >&2; exit 1; }
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "build-tools;36.0.0" "platform-tools"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          echo "$sdk/build-tools/36.0.0" >> "$GITHUB_PATH"
+
+      - name: Fetch and verify apktool 2.9.3
+        run: |
+          set -euo pipefail
+          dst="$RUNNER_TEMP/apktool_2.9.3.jar"
+          curl -fsSL -o "$dst" "$APKTOOL_URL"
+          echo "$APKTOOL_SHA  $dst" | sha256sum -c -
+          echo "APKTOOL_JAR=$dst" >> "$GITHUB_ENV"
+
+      # The 14.8 GB image will not fit on / comfortably, so it goes on the /mnt
+      # temp disk: stream the 7.1 GB gzip through gunzip (the gzip itself is never
+      # stored), verify the unpacked image's sha256, dump the stock APK, then
+      # delete the image at once.
+      - name: Extract stock SystemUI.apk from the ColorOS image
+        run: |
+          set -euo pipefail
+          df -h /mnt || true
+          avail_kb=$(df -P --output=avail /mnt | tail -n1 | tr -dc '0-9')
+          # 14.8 GB image + headroom; fail early with a clear message if /mnt is too small.
+          need_kb=$((17 * 1024 * 1024))
+          if [ "${avail_kb:-0}" -lt "$need_kb" ]; then
+            echo "::error::/mnt has ${avail_kb} KB free, need at least ${need_kb} KB for the 14.8 GB image" >&2
+            exit 1
+          fi
+          img=/mnt/oneos-1105-system.img
+          set -o pipefail
+          curl -fsSL "$IMG_URL" | gunzip > "$img"
+          echo "$IMG_SHA  $img" | sha256sum -c -
+          # The image carries /system/system_ext/...; dump into the workspace.
+          debugfs -R "dump /system/system_ext/priv-app/SystemUI/SystemUI.apk $PWD/stock-SystemUI.apk" "$img"
+          rm -f "$img"
+          echo "$STOCK_SYSTEMUI_SHA  stock-SystemUI.apk" | sha256sum -c -
+          df -h /mnt || true
+
+      - name: Build the SystemUI wave set
+        run: |
+          set -euo pipefail
+          mkdir -p out-set
+          # make-coloros-wave-set.sh runs "$APKTOOL d ..." directly, so APKTOOL is
+          # the full command. zipalign (apktool b) is on PATH from the SDK step.
+          APKTOOL="java -jar $APKTOOL_JAR" scripts/make-coloros-wave-set.sh "$PWD/stock-SystemUI.apk" "$PWD/out-set"
+          cp out-set/SystemUI_wave.dex out-set/ColorPanoramicSystemUI.apk .
+
+      - name: Build services_patched.jar
+        env:
+          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH_SERVICES }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o r2.jar "$R2_JAR_URL"
+          echo "$R2_JAR_SHA  r2.jar" | sha256sum -c -
+          # patch-built-jar.sh runs "java -jar $APKTOOL", so APKTOOL is the jar path.
+          # SOURCE_DATE_EPOCH pins the rebuilt dex's mtime so the jar is reproducible.
+          APKTOOL="$APKTOOL_JAR" scripts/patch-built-jar.sh \
+            r2.jar switcher/patches/guest_no_biometric_writes.py services_patched.jar
+
+      - name: Copy guards.txt
+        run: |
+          set -euo pipefail
+          cp "$GUARDS_SRC" guards.txt
+
+      # Verify the four rebuilt files against the pins read from the .sha256 file,
+      # then stage each under its own SHA-256 name (the asset name the app fetches).
+      # Any mismatch fails the job here, before any release is touched.
+      - name: Verify against pinned hashes
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          fail=0
+          for f in SystemUI_wave.dex ColorPanoramicSystemUI.apk services_patched.jar guards.txt; do
+            expected=$(awk -v n="$f" '$2==n {print $1}' "$SHAFILE")
+            if [ -z "$expected" ]; then
+              echo "::error::$f has no pinned hash in $SHAFILE" >&2
+              fail=1; continue
+            fi
+            actual=$(sha256sum "$f" | cut -d' ' -f1)
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::$f sha256 mismatch: expected $expected, got $actual" >&2
+              fail=1; continue
+            fi
+            echo "OK  $f  $actual"
+            # Asset named by its SHA-256, as SetDownloader downloads it.
+            cp "$f" "assets/$expected"
+          done
+          [ "$fail" -eq 0 ] || { echo "::error::one or more files did not match; publishing nothing" >&2; exit 1; }
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          notes="Set files of ${SET_ID}, with each asset named by its SHA-256, the name the OneOS app downloads it under. services_patched.jar carries the guard that fails a fingerprint or face enroll, or a removal, in the guest before Samsung's HAL, so the guest removes or enrolls none of One UI's biometrics. All four are rebuilt from public sources by this workflow and verified against the hashes pinned in the repo; not yet tried on a phone."
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --prerelease --title "$TAG" --notes "$notes"
+          fi
+          gh release upload "$TAG" \
+            "assets/$(sha256sum SystemUI_wave.dex | cut -d' ' -f1)" \
+            "assets/$(sha256sum ColorPanoramicSystemUI.apk | cut -d' ' -f1)" \
+            "assets/$(sha256sum services_patched.jar | cut -d' ' -f1)" \
+            "assets/$(sha256sum guards.txt | cut -d' ' -f1)" \
+            --clobber
+
+      - name: Job summary
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### x9u-in-1105-sultra set files"
+            echo ""
+            echo "| file | size (bytes) | sha256 |"
+            echo "|---|---|---|"
+            for f in SystemUI_wave.dex ColorPanoramicSystemUI.apk services_patched.jar guards.txt; do
+              if [ -f "$f" ]; then
+                printf '| `%s` | %s | `%s` |\n' "$f" "$(stat -c%s "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"
+              else
+                printf '| `%s` | — | not built |\n' "$f"
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
