@@ -60,7 +60,7 @@ jobs:
           echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
 
       # :app refuses to run its staging task without the git-ignored
       # switcher/assets/guest_manager.apk, so stage it first.
@@ -112,7 +112,7 @@ jobs:
             echo "Debug-signed with the runner's key: it cannot be installed over an app signed with the original key."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: oneos-full-debug-${{ steps.apk.outputs.short_sha }}
           path: |
