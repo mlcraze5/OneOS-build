@@ -95,30 +95,34 @@ jobs:
           echo "$APKTOOL_SHA  $dst" | sha256sum -c -
           echo "APKTOOL_JAR=$dst" >> "$GITHUB_ENV"
 
-      # The 14.8 GB image will not fit on / comfortably, so it goes on the /mnt
-      # temp disk: stream the 7.1 GB gzip through gunzip (the gzip itself is never
-      # stored), verify the unpacked image's sha256, dump the stock APK, then
-      # delete the image at once.
+      # The 14.8 GB image goes on whichever writable disk has the most room: the
+      # /mnt temp disk where the runner has one, else the workspace's own disk
+      # (run 1: this runner had no separate /mnt and 88 GB free on /). The 7.1 GB
+      # gzip streams through gunzip and is never stored; the unpacked image's
+      # sha256 is checked, the stock APK dumped, and the image deleted at once.
       - name: Extract stock SystemUI.apk from the ColorOS image
         run: |
           set -euo pipefail
-          df -h /mnt || true
-          avail_kb=$(df -P --output=avail /mnt | tail -n1 | tr -dc '0-9')
-          # 14.8 GB image + headroom; fail early with a clear message if /mnt is too small.
           need_kb=$((17 * 1024 * 1024))
-          if [ "${avail_kb:-0}" -lt "$need_kb" ]; then
-            echo "::error::/mnt has ${avail_kb} KB free, need at least ${need_kb} KB for the 14.8 GB image" >&2
+          best=""; best_kb=0
+          for d in /mnt "${RUNNER_TEMP:-/tmp}" "$PWD"; do
+            [ -d "$d" ] && [ -w "$d" ] || continue
+            kb=$(df -Pk "$d" | awk 'NR == 2 { print $4 }')
+            echo "$d: ${kb} KB free"
+            if [ "${kb:-0}" -gt "$best_kb" ]; then best=$d; best_kb=$kb; fi
+          done
+          if [ -z "$best" ] || [ "$best_kb" -lt "$need_kb" ]; then
+            echo "::error::no writable disk with ${need_kb} KB free for the 14.8 GB image (best: ${best:-none}, ${best_kb} KB)" >&2
             exit 1
           fi
-          img=/mnt/oneos-1105-system.img
-          set -o pipefail
-          curl -fsSL "$IMG_URL" | gunzip > "$img"
+          img="$best/oneos-1105-system.img"
+          echo "image at $img"
+          curl -fsSL --retry 3 "$IMG_URL" | gunzip > "$img"
           echo "$IMG_SHA  $img" | sha256sum -c -
           # The image carries /system/system_ext/...; dump into the workspace.
           debugfs -R "dump /system/system_ext/priv-app/SystemUI/SystemUI.apk $PWD/stock-SystemUI.apk" "$img"
           rm -f "$img"
           echo "$STOCK_SYSTEMUI_SHA  stock-SystemUI.apk" | sha256sum -c -
-          df -h /mnt || true
 
       - name: Build the SystemUI wave set
         run: |
