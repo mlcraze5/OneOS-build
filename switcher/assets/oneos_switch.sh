@@ -4007,7 +4007,9 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         #   composer rejections (HW overlays are on by default now);
                         # - dexopt.txt: run 43's first boot failed to compile all 232
                         #   packages (NullPointerException in IArtd.maybeCreateSdc);
-                        # - frames.txt: launcher and Settings frame pacing;
+                        #   ColorOS's launcher too (com.android.launcher; S Ultra, X9U IN,
+                        #   session 146de99d left its dexopt status unknown);
+                        # - frames.txt: launcher (Pixel's and ColorOS's) and Settings frame pacing;
                         # - comfort.txt: Comfort View settings, color matrix, bridge log;
                         # - signal_poll.txt, host_ril_props.txt (identifiers left out),
                         #   call_audio_route.txt: phone process, its overlays and
@@ -4023,9 +4025,9 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                           { grep -E 'missed frame count|usesDeviceComposition|composition=' \$D/surfaceflinger.txt | sed -e 's/^ *//' -e 's/layer=0x[0-9a-f]* //' | sort | uniq -c
                             echo \"composer rejections in the log: \$(timeout 10 logcat -d -b main -s SurfaceFlinger:E 2>/dev/null | grep -c -E 'executeCommands failed|presentOrValidate failed')\"
                             grep -h -E 'HW overlays|GPU composition' $STAGE/data/takeover.log 2>/dev/null; } > \$D/composition.txt 2>&1
-                          { for p in com.android.systemui com.google.android.apps.nexuslauncher com.android.settings; do echo \"== pm art dump \$p\"; gx /system/bin/pm art dump \$p 2>&1 | head -n 30; done
+                          { for p in com.android.systemui com.google.android.apps.nexuslauncher com.android.launcher com.android.settings; do echo \"== pm art dump \$p\"; gx /system/bin/pm art dump \$p 2>&1 | head -n 30; done
                             echo '== ArtService'; timeout 10 logcat -d -s ArtService 2>/dev/null | grep -m2 -A4 'Unexpected package-level'; } > \$D/dexopt.txt 2>&1
-                          for p in com.google.android.apps.nexuslauncher com.android.settings; do echo \"== \$p\"; gx /system/bin/dumpsys gfxinfo \$p 2>&1 | grep -E 'Total frames|Janky|percentile'; done > \$D/frames.txt 2>&1
+                          for p in com.google.android.apps.nexuslauncher com.android.launcher com.android.settings; do echo \"== \$p\"; gx /system/bin/dumpsys gfxinfo \$p 2>&1 | grep -E 'Total frames|Janky|percentile'; done > \$D/frames.txt 2>&1
                           { for k in cv_enabled cv_preferred_intensity cv_dynamic_enabled; do echo \"\$k=\$(gx /system/bin/settings get system \$k 2>&1)\"; done
                             grep -i -E -A6 'color ?matrix|colortransform' \$D/surfaceflinger.txt | head -n 40
                             timeout 10 logcat -d -s OneOSComfortView DisplayTransformManager 2>/dev/null | tail -n 10; } > \$D/comfort.txt 2>&1
