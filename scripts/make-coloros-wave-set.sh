@@ -4,8 +4,8 @@
 #
 # x9u-in-1105-sultra's two files were first built on a machine whose tree was lost; this rebuilds
 # them from the repo alone (apktool 2.9.3 on the November image's stock SystemUI 620aff68… gives the
-# pinned 02fc1190 and 6dc45991). The wave dex is the fingerprint-wave patch's dex, as in
-# make-systemui-wave.sh. The merged APK is the same decoded tree with make-coloros-panoramic-aod.py's
+# pinned c0bf8bb1 and d9ce350d of set r5; r4's patch gave 02fc1190 and 6dc45991). The wave dex is
+# the fingerprint-wave patch's dex, as in make-systemui-wave.sh. The merged APK is the same decoded tree with make-coloros-panoramic-aod.py's
 # two smali edits on top, so one APK carries both: its wave+AOD dex and the dex with DozeService go
 # into the stock APK with apk-replace-dex.py, which keeps the signing block where PackageManager
 # looks for it.

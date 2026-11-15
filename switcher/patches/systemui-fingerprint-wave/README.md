@@ -26,6 +26,18 @@ glyph and usually finished long before authentication. The patch:
   the home screen and the pending hide removes the ring at its end.
 - Builds the auth wave with a 16 ms frame duration (the stock pressed asset
   uses 20 ms, which does not divide evenly into 120 Hz vsyncs).
+- At screen on (`onScreenTurnedOn`, main thread) clears the dream/doze/sleep
+  flags and posts `OneOsWakeGlyph` to `opticalUiUpdateHandler`, which sets the
+  glyph drawable, makes the icon visible and sets alpha 1 on the
+  `OnScreenFingerprint OpticalUIUpdateThread` that owns `fpIcon`'s view root.
+  When it was posted, the stock "fp icon not visible, check again" re-show is
+  skipped so it does not fade the glyph in a second time. 0.5.09 touched
+  `fpIcon` from the main thread and SystemUI died with
+  `CalledFromWrongThreadException` at every power-button screen on (S Ultra,
+  session 3d9814984612c525). Every other view call the patch adds already runs
+  on that thread: `hideUdfpsOverlay$1` and the `OneOsGlyphShow` post go through
+  its handler, and the `$1` and `updateFpIconAlpha$1` cases through
+  `KeyguardFingerprintUtils.updateOpticalUI`.
 - Disables `notifyHighlightVisibleUpdate`, keeping the full-screen black
   `OnScreenFingerprintDimLayer` window out of the unlock path.
 
@@ -36,13 +48,15 @@ Stock behavior is otherwise untouched: the pressed drawable, the listener,
 
 `systemui-fingerprint-wave.patch` is a unified diff against the stock
 `smali_classes3/com/oplus/systemui/biometrics/finger/udfps/` files. It adds the
-new `OneOsGlyphShow.smali` and changes:
+new `OneOsGlyphShow.smali` and `OneOsWakeGlyph.smali` and changes:
 
 | File | Change |
 | --- | --- |
-| `OnScreenFingerprintUiMech.smali` | `oneosWakeAt` field, auth intercept in `hideUdfpsOverlay$1`, `oneosStartWave()`, `notifyHighlightVisibleUpdate` no-op |
+| `OnScreenFingerprintUiMech.smali` | `oneosWakeAt` field, wake glyph post in `access$onScreenTurnedOn` (`oneosWakeGlyph()`), auth intercept in `hideUdfpsOverlay$1`, `oneosStartWave()`, `notifyHighlightVisibleUpdate` no-op |
 | `OnScreenFingerprintUiMech$1.smali` | wake stamp in `:pswitch_b`, glyph gate + delayed show in `:pswitch_3` |
+| `OnScreenFingerprintUiMech$updateFpIconAlpha$1.smali` | in `showFingerprintIconAnimation`'s case, keeps the icon visible instead of hiding it while the screen is on |
 | `OneOsGlyphShow.smali` | new `Runnable` for the delayed glyph show |
+| `OneOsWakeGlyph.smali` | new `Runnable` for the wake glyph on the optical UI thread |
 
 `scripts/make-systemui-wave.sh` decodes a stock APK, applies the patch,
 rebuilds `classes3.dex` and replaces it in the original archive. It applies to

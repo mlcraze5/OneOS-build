@@ -17,7 +17,7 @@ on:
       tag:
         description: "Release tag to publish the assets under (the app's gh:<tag> source)."
         required: true
-        default: "coloros-1105-r4"
+        default: "coloros-1105-r5"
 
 permissions:
   contents: write
@@ -102,7 +102,7 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          notes="Set files of ${SET_ID}, with each asset named by its SHA-256, the name the OneOS app downloads it under. services_patched.jar carries the guard that fails a fingerprint or face enroll, or a removal, in the guest before Samsung's HAL, so the guest removes or enrolls none of One UI's biometrics. From coloros-1105-r4 on it also opens Samsung's AIDL fingerprint HAL instead of the absent HIDL 2.1 adapter (patches/guest_force_aidl_fingerprint.py), which kept fingerprint off the guest's lock screen. All four are checked against the hashes pinned in the repo before publishing; not yet tried on a phone."
+          notes="Set files of ${SET_ID}, with each asset named by its SHA-256, the name the OneOS app downloads it under. services_patched.jar carries the guard that fails a fingerprint or face enroll, or a removal, in the guest before Samsung's HAL, so the guest removes or enrolls none of One UI's biometrics. From coloros-1105-r4 on it also opens Samsung's AIDL fingerprint HAL instead of the absent HIDL 2.1 adapter (patches/guest_force_aidl_fingerprint.py), which kept fingerprint off the guest's lock screen. From coloros-1105-r5 on SystemUI_wave.dex and ColorPanoramicSystemUI.apk draw the fingerprint wake glyph from SystemUI's fingerprint UI thread instead of the main thread, which crashed SystemUI at every screen on. All four are checked against the hashes pinned in the repo before publishing; not yet tried on a phone."
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --prerelease --title "$TAG" --notes "$notes"
           fi
