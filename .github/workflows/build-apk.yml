@@ -110,7 +110,7 @@ jobs:
             echo "| sha256 | \`$sha\` |"
             echo ""
             echo "Debug-signed with the runner's key: it cannot be installed over an app signed with the original key."
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v6
         with:
