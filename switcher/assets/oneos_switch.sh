@@ -2741,7 +2741,12 @@ while true; do
             # AOSP's scale here; repaired only while the guest is still at that
             # default, so a value the owner set later (the slider writes mode 0)
             # stays. Not a ColorOS value: 4570 is ColorOS's scale.
-            if [ \$GUEST_MIUI = 1 ]; then
+            # GUEST_MIUI is the generator's value, written in here as the
+            # MiWallpaper test above does: escaped, it read an unset runtime
+            # variable, the test was [ = 1 ] (\"sh: 1: unknown operand\" in
+            # ui_activator.log, ColorOS session 3d9814984612c525), and this
+            # HyperOS repair never ran.
+            if [ $GUEST_MIUI = 1 ]; then
                 bm=\$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system screen_brightness 2>/dev/null)
                 mm=\$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system screen_brightness_mode 2>/dev/null)
                 case \"\${bm:-}\" in ''|*[!0-9]*) bm=-1 ;; esac
