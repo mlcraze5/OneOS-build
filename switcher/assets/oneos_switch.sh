@@ -3725,6 +3725,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
         echo \$\$ > /sys/fs/cgroup/cgroup.procs 2>/dev/null
         echo -1000 > /proc/\$\$/oom_score_adj 2>/dev/null
         t=0; total=0; dead=0; sfgone=0; prev_failed=0; homebase=0; wmbase=0; wmseen=0
+        rm -f $STAGE/diag.pid
         while [ \$t -lt $RETURN_MAX ]; do
             # The 10 s wait ends early on a request. Run 34: Volume Up + Volume
             # Down were held 3 s from 16:43:56, but the request was handled only
@@ -3826,10 +3827,23 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                 done
                 echo \"\$(date) logcat capture: \$(ls $LOGS/head 2>/dev/null | wc -l) files of the boot kept in $LOGS/head (hard links)\"
             fi
+            # One round at a time: a capture still running from the round before
+            # (diag.pid, session 146de99d) skips this one rather than piling up.
+            if [ -n \"\$dname\" ] && kill -0 \"\$(cat $STAGE/diag.pid 2>/dev/null)\" 2>/dev/null; then
+                echo \"\$(date) display diagnostics \$dname skipped: the previous round is still running\"
+                dname=''
+            fi
             if [ -n \"\$dname\" ]; then
                 SFP=\$(pidof surfaceflinger | awk '{print \$1}')
                 if [ -n \"\$SFP\" ]; then
-                    D=$STAGE/diag_\$dname; mkdir -p \$D
+                    D=$STAGE/diag_\$dname
+                    # The whole round in the background (S Ultra X9U session 146de99d:
+                    # Back to One UI tapped in the guest at 20:39:13 was seen only at
+                    # 20:40:31, after diag_40; the splash then asked for the keys).
+                    # The request checks above run every second only between rounds,
+                    # and a round is dozens of dumps, two debuggerd and 15 s of
+                    # getevent. Its pid is in diag.pid until it ends.
+                    ( mkdir -p \$D
                     # Who has the vold names now: One UI's vold keeps vold and
                     # android.system.vold.IVold/default, the guest's is gvld (run 44).
                     { for n in vold android.system.vold.IVold/default gvld; do echo \"\$n: \$(timeout 5 dumpsys --pid \$n 2>&1 | head -n 1)\"; done
@@ -3975,8 +3989,8 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         done
                         # system_server's own black-screen backtraces (OplusWmBlackDetector).
                         cp -r $STAGE/data/debugging/wm/black \$D/wm_black 2>/dev/null
-                        # Run 44, in the background so a slow dump does not hold up the
-                        # return keys (each call has its own timeout). Read only:
+                        # Run 44 (the whole round is in the background now, see above):
+                        # each call has its own timeout. Read only:
                         # - largescreen.txt: the density and fold line the UI activator
                         #   set, device state, configuration, WM Extensions warnings;
                         # - composition.txt: device or GPU composition, missed frames,
@@ -4011,9 +4025,14 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                             gx /system/bin/grep ' /system_ext' /proc/self/mountinfo; } > \$D/signal_poll.txt 2>&1
                           getprop | grep -i -E 'ril|radio' | grep -v -i -E 'imei|imsi|iccid|msisdn|meid|esn|mdn|euimid|serial|number|subinfo' > \$D/host_ril_props.txt 2>&1
                           gx /system/bin/dumpsys audio 2>&1 | grep -i -E 'sco|communication device' | head -n 20 > \$D/call_audio_route.txt
-                        ) </dev/null >/dev/null 2>&1 &
+                        ) </dev/null >/dev/null 2>&1
                     fi
-                    echo \"\$(date) display diagnostics saved in \$D\"
+                    # Written by the capture itself when it ends, to this watcher's
+                    # log (auto_return.log, its stdout), so the line still means done.
+                    echo \"\$(date) display diagnostics saved in \$D\" >> $STAGE/auto_return.log
+                    rm -f $STAGE/diag.pid
+                    ) </dev/null >/dev/null 2>&1 &
+                    echo \$! > $STAGE/diag.pid
                 fi
             fi
             # A running surfaceflinger can still show nothing: when the composer
