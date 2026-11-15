@@ -3839,7 +3839,14 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             fi
             # One round at a time: a capture still running from the round before
             # (diag.pid, session 146de99d) skips this one rather than piling up.
-            if [ -n \"\$dname\" ] && kill -0 \"\$(cat $STAGE/diag.pid 2>/dev/null)\" 2>/dev/null; then
+            # Only a real pid (digits, no leading 0) is checked: with no
+            # diag.pid busybox's kill -0 '' takes the empty pid as 0, its own
+            # process group, and succeeds, so every round was skipped (S Ultra
+            # X9U session 3d9814984612c525, the first one right after the rm
+            # above).
+            dpid=\$(cat $STAGE/diag.pid 2>/dev/null)
+            case \"\$dpid\" in ''|0*|*[!0-9]*) dpid='' ;; esac
+            if [ -n \"\$dname\" ] && [ -n \"\$dpid\" ] && kill -0 \"\$dpid\" 2>/dev/null; then
                 echo \"\$(date) display diagnostics \$dname skipped: the previous round is still running\"
                 dname=''
             fi
@@ -3852,8 +3859,13 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     # 20:40:31, after diag_40; the splash then asked for the keys).
                     # The request checks above run every second only between rounds,
                     # and a round is dozens of dumps, two debuggerd and 15 s of
-                    # getevent. Its pid is in diag.pid until it ends.
-                    ( mkdir -p \$D
+                    # getevent. Its pid is in diag.pid until it ends: the round
+                    # writes it itself (/proc/self/stat, read in this subshell),
+                    # so its rm at the end always comes after the write. Written
+                    # by this watcher from \$! instead, a round that ended first
+                    # would leave a stale pid that a reused pid keeps alive.
+                    ( read -r dpid _ < /proc/self/stat && echo \$dpid > $STAGE/diag.pid
+                    mkdir -p \$D
                     # Who has the vold names now: One UI's vold keeps vold and
                     # android.system.vold.IVold/default, the guest's is gvld (run 44).
                     { for n in vold android.system.vold.IVold/default gvld; do echo \"\$n: \$(timeout 5 dumpsys --pid \$n 2>&1 | head -n 1)\"; done
@@ -4044,7 +4056,6 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     echo \"\$(date) display diagnostics saved in \$D\" >> $STAGE/auto_return.log
                     rm -f $STAGE/diag.pid
                     ) </dev/null >/dev/null 2>&1 &
-                    echo \$! > $STAGE/diag.pid
                 fi
             fi
             # A running surfaceflinger can still show nothing: when the composer
