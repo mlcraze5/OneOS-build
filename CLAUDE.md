@@ -85,3 +85,61 @@ and before any subagent is briefed:
 - Face match time (0.8-2 s): Samsung's face HAL loads its TA on every
   authenticate (about 0.35 s) and needs several frames in low light. Inside
   Samsung's HAL; not touched.
+
+## Lessons from past sessions (2026-11-15/16, S25 Ultra + ColorOS 17)
+
+Mistakes made once; check for them before every change and every claim.
+
+### Shell and generated scripts
+- oneos_switch.sh writes the watcher and the UI activator as double-quoted
+  generated text: `\$X` is read at runtime, `$X` at generation. A variable
+  that only the generator knows (e.g. GUEST_MIUI) must be `$X`; `\$X` is
+  empty at runtime and the branch never runs (67c8e95).
+  scripts/test-generated-script-vars.py checks this.
+- busybox `kill -0 ''` succeeds (the empty pid is taken as 0, the process
+  group). Check that a pid read from a file is a non-empty number before
+  `kill -0`, and write the pid file from the child itself, not after `$!`
+  (db851a7 skipped every diag round; fixed in 1921ecc).
+- Run `sh -n`, `dash -n` and `busybox sh -n` on any changed script, plus a
+  test that runs the real snippet with stubbed commands.
+
+### Android / guest
+- A patched SystemUI must touch a view only on the thread that owns it
+  (ColorOS fpIcon: the OnScreenFingerprint OpticalUIUpdateThread, through
+  opticalUiUpdateHandler). The main-thread call crashed SystemUI on every
+  power-button wake (d1aa4c7).
+- Compiles in the guest run only with the guest's own artd: with One UI's,
+  dex2oat runs outside the guest and the return cannot stop it (eea9253).
+- A compiled odex is used from the app's next start: judge a compile fix in
+  the session after the one that compiled it.
+- Before saying a set file or patch is or is not used, check it in the set
+  (remote.txt, sha256 list) and in the log; once I wrongly said the wave
+  patch was not bound.
+
+### Reading the logs
+- The watcher's "after N s" counts awake time, not wall time; a 12-minute
+  session can read 180 s. Diag rounds follow that counter and can still be
+  running when the return starts (their pm calls then fail).
+- Merge capture files oldest first: head_boot.log.03, .02, .01, head_boot.log,
+  boot.log.01, boot.log.
+- "Heat cap ... full clock" lines show what was written; the sampler's
+  policyN values show what the kernel kept. Check both.
+- Find who holds a limit before "fixing" it: power saving, the heat cap,
+  Samsung's thermal and the camera HAL can all lower scaling_max_freq.
+
+### Process
+- The return to One UI is never changed in passing. Return-path findings are
+  written down and left for a dedicated, reviewed change.
+- CI does not run scripts/test-*.py; run them locally. The baseline has 10
+  known failures (test-coloros-followup, test-guest-boot-service-gate,
+  test-guest-module-lifecycle, test-guest-root, test-guest-security,
+  test-oplus-aod-feature, test-oplus-bt-origin, test-permission-cleanup,
+  test-samcam-resolution-lookup, test-staging-apk); a change must not add one.
+- Agents may work in parallel only on different files; review and commit each
+  change separately.
+- New set files reach the phone only after the owner runs "Publish set files"
+  (workflow_dispatch from work/integration); the session never publishes.
+- The container can be recycled mid-session: the checkout comes back on
+  main. Fetch work/integration again, and check pushes with
+  `git ls-remote origin work/integration`, not only the local tracking ref
+  (a stale ref once made the stop hook report pushed commits as unpushed).
