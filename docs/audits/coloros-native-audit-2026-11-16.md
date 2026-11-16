@@ -11,6 +11,20 @@ The guest image itself was not available, so every claim about what is inside Co
 
 ---
 
+## Status (updated 2026-11-16, after sessions bceaef29fb128e94 and c2d30e95cde9775b)
+
+Done or learned (do not plan again):
+- **Guest baseline 16 s -> under 1 s** (c9e13b9, DeathThoughts/OneOS-test PR #1). Tried on the phone, bceaef29fb128e94.
+- **CPU heat cap needs three readings** (91a68d9, PR #2). Tried on the phone, c2d30e95cde9775b: 16 spikes held back. Level 3 still came twice, on zones at 100-106 C for 30 s while Samsung's AP read 48-51 C. Basing the CPU rule on AP was proposed to the rule's owner; not done.
+- **Preflight timing** (bd980c5, PR #2). Tried on the phone, c2d30e95cde9775b: of the 15 s before "switch start", 9 s are the libtimer.so readlink scan (one fork per process) and 2 s are the files.sha256 hash (62 files, 819 MB). The hash is not the cost. The scan fix is in progress on branch fix/fp-icon-and-libtimer.
+- **Fork counter in the sampler** (d58d388, PR #2). Tried on the phone, c2d30e95cde9775b: 167-469 forks/s (10,000-28,000 a minute) all session, which confirms the size of finding 1's fork budget. Forks alone do not explain the sys CPU: at 05:58:12, 167 forks/s came with 28% sys.
+- **Heat of session bceaef29fb128e94** was mostly the phone charging (owner's condition). Unplugged, c2d30e95cde9775b peaked at 42.6 C skin, against 46.1 C.
+- **ColorOS fingerprint icon too low** (owner, c2d30e95cde9775b): the icon dpi was taken from a shell virtual display (329 dpi) instead of the panel (501.04). The fix is in progress on branch fix/fp-icon-and-libtimer.
+
+Not started (owner: leave as it is for now): findings 1-10 below, unchanged.
+
+---
+
 ## 1. Top opportunities, ranked by gain, effort and risk
 
 | # | What | Gain | Effort | Risk |
