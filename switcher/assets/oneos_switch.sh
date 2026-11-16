@@ -974,15 +974,34 @@ if ! pidof imsd >/dev/null 2>&1; then
 fi
 ims_i=0
 ims_st=1
-while [ "$ims_i" -lt 45 ]; do
-    if dumpsys telephony.registry 2>/dev/null | grep -q 'mVoiceRegState=0'; then
-        ims_st=0
-        break
-    fi
-    ims_i=$((ims_i + 1))
-    sleep 2
-done
-echo "IMS gate: voiceRegState=$ims_st after $((ims_i * 2))s, imsd=${ims_pid:-$(pidof imsd)}"
+# With no SIM in any slot the voice state never reaches 0 (only OUT_OF_SERVICE
+# or POWER_OFF), so the wait below always ran its full 90 s for nothing: S25
+# Ultra session 25b4785c4206828f, no SIM, 90 s lost on every switch. Skip it
+# only when One UI's gsm.sim.state names every slot ABSENT; an empty, unknown
+# or not-yet-ready state still waits as before.
+ims_sim=$(getprop gsm.sim.state 2>/dev/null)
+ims_nosim=0
+ims_rest=$(printf '%s' "$ims_sim" | sed 's/[[:space:]]*,[[:space:]]*/,/g; s/^[[:space:]]*//; s/[[:space:]]*$//')
+if [ -n "$ims_rest" ]; then
+    ims_rest=",$ims_rest"
+    while [ "${ims_rest#,ABSENT}" != "$ims_rest" ]; do
+        ims_rest=${ims_rest#,ABSENT}
+    done
+    [ -z "$ims_rest" ] && ims_nosim=1
+fi
+if [ "$ims_nosim" = 1 ]; then
+    echo "IMS gate: skipped, no SIM (gsm.sim.state=$ims_sim), imsd=${ims_pid:-$(pidof imsd)}"
+else
+    while [ "$ims_i" -lt 45 ]; do
+        if dumpsys telephony.registry 2>/dev/null | grep -q 'mVoiceRegState=0'; then
+            ims_st=0
+            break
+        fi
+        ims_i=$((ims_i + 1))
+        sleep 2
+    done
+    echo "IMS gate: voiceRegState=$ims_st after $((ims_i * 2))s, imsd=${ims_pid:-$(pidof imsd)}"
+fi
 echo "preflight: ims gate done $(date +%T)"
 
 # --- ADB WATCHDOG ---------------------------------------------------------
