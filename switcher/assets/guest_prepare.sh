@@ -4112,6 +4112,23 @@ echo "OPPO default grants: $([ -f "$STAGE/data/oneos_oplus_grants" ] && echo on 
 # in the guest data. Every write is the guest script's, in the guest's mount
 # namespace. ColorOS guests only (oplus-services.jar); ONEOS_GUEST_SYSUI_COMPILE=0
 # leaves it out.
+# The ColorOS launcher next, the same way (S25 Ultra, X9U IN guest, set
+# x9u-in-1105-sultra, session 25b4785c4206828f). com.android.launcher
+# (OplusLauncher.apk) had no odex at all: its maps held only the image's
+# oat/arm64/OplusLauncher.vdex and a runtime app image in its
+# cache/oat_primary, and its Java frames ran from OplusLauncher.apk on the
+# interpreter and JIT, for the same reason (no maintenance window in a
+# session). Lock, unlock and home lagged; the unlock animation runs in the
+# launcher (LauncherOneShot). So once SystemUI's step is done, whatever its
+# outcome (each step is a function that returns, so a skip or a failure of
+# SystemUI's does not end the script), the launcher's APK from pm path is
+# checked once per APK under its own marker, /data/oneos_launcher_compiled
+# (same key: APK sha256 and boot image), and compiled with speed when it runs
+# from the APK, verified only or in error: the launcher has no profile worth
+# the name in a session, so speed-profile would compile next to nothing. Not
+# restarted either: the compiled code is used from the launcher's next start.
+# Same log, its lines start with "launcher". ONEOS_GUEST_LAUNCHER_COMPILE=0
+# leaves the launcher step out of the script.
 rm -f "$STAGE/data/oneos_sysui_compile.sh"
 if [ "${ONEOS_GUEST_SYSUI_COMPILE:-1}" != 1 ]; then
     echo "ColorOS SystemUI compile: off (ONEOS_GUEST_SYSUI_COMPILE=${ONEOS_GUEST_SYSUI_COMPILE:-})"
@@ -4126,11 +4143,56 @@ if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 32768 ]; then
 fi
 exec >>"$LOG" 2>&1
 log() { echo "$(date '+%m-%d %T') $*"; }
-# arm64 status of SystemUI's APK as ArtService reports it (run-from-apk, verify, speed, ...).
-status() { timeout 60 pm art dump com.android.systemui 2>/dev/null | sed -n 's/.*arm64: \[status=\([^]]*\)\].*/\1/p' | head -n 1; }
+# arm64 status of a package's APK as ArtService reports it (run-from-apk, verify, speed, ...).
+status() { timeout 60 pm art dump "$1" 2>/dev/null | sed -n 's/.*arm64: \[status=\([^]]*\)\].*/\1/p' | head -n 1; }
 compiled() { case "$1" in speed|speed-profile|everything|everything-profile) return 0 ;; esac; return 1; }
-remember() { rm -f "$MARK.new"; echo "$KEY" > "$MARK.new" && mv -f "$MARK.new" "$MARK"; }
-[ -f "$APK" ] || { log "no $APK: nothing to do"; exit 0; }
+# remember MARKER KEY
+remember() { rm -f "$1.new"; echo "$2" > "$1.new" && mv -f "$1.new" "$1"; }
+# Marker key of an APK: its sha256 (size and time if sha256sum fails) and the boot image's.
+apkkey() {
+    k=$(sha256sum "$1" 2>/dev/null | cut -d' ' -f1)
+    [ -n "$k" ] || k=$(stat -c 'size=%s,mtime=%Y' "$1" 2>/dev/null)
+    b=$(stat -c '%s:%Y' /data/misc/apexdata/com.android.art/dalvik-cache/arm64/boot.oat 2>/dev/null)
+    echo "apk=${k:-unknown} boot=${b:-image}"
+}
+# Each step returns rather than exits, so the steps after it run whatever its outcome.
+sysui() {
+    [ -f "$APK" ] || { log "no $APK: nothing to do"; return 0; }
+    KEY=$(apkkey "$APK")
+    if [ -f "$MARK" ] && [ ! -L "$MARK" ] && [ "$(cat "$MARK" 2>/dev/null)" = "$KEY" ] &&
+            ls /data/dalvik-cache/arm64/*@SystemUI@SystemUI.apk@classes.dex >/dev/null 2>&1; then
+        log "SystemUI compiled on an earlier session for this APK ($KEY): skipped"
+        return 0
+    fi
+    S=$(status com.android.systemui)
+    if compiled "$S"; then
+        remember "$MARK" "$KEY"
+        log "SystemUI arm64 is $S already: nothing to compile ($KEY)"
+        return 0
+    fi
+    case "$S" in
+        run-from-apk|verify|error|extract) ;;
+        *) log "SystemUI arm64 status '${S:-not read}': not compiled"; return 0 ;;
+    esac
+    f=$(getprop dalvik.vm.systemuicompilerfilter)
+    f=${f:-speed}
+    log "SystemUI arm64 is $S ($KEY): cmd package compile -m $f -f com.android.systemui"
+    t0=$(date +%s)
+    R=$(timeout 300 cmd package compile -m "$f" -f com.android.systemui 2>&1)
+    rc=$?
+    t=$(($(date +%s) - t0))
+    A=$(status com.android.systemui)
+    log "result: $(echo "$R" | tail -n 1 | cut -c1-200) (exit $rc, $t s); SystemUI arm64 now ${A:-not read}"
+    case "$A" in
+        ''|run-from-apk|error|extract) log "no marker: tried again next session" ;;
+        *) if [ $rc = 0 ] && echo "$R" | grep -q '^Success'; then
+               remember "$MARK" "$KEY" && log "marker saved: later sessions skip this until the APK or the boot image changes"
+           else
+               log "no marker: tried again next session"
+           fi ;;
+    esac
+    return 0
+}
 # Shared with One UI's properties, so already 1 in practice: the sleep 60 is the real wait.
 n=0
 while [ "$(getprop sys.boot_completed)" != 1 ]; do
@@ -4139,46 +4201,57 @@ while [ "$(getprop sys.boot_completed)" != 1 ]; do
     sleep 2
 done
 sleep 60
-k=$(sha256sum "$APK" 2>/dev/null | cut -d' ' -f1)
-[ -n "$k" ] || k=$(stat -c 'size=%s,mtime=%Y' "$APK" 2>/dev/null)
-b=$(stat -c '%s:%Y' /data/misc/apexdata/com.android.art/dalvik-cache/arm64/boot.oat 2>/dev/null)
-KEY="apk=${k:-unknown} boot=${b:-image}"
-if [ -f "$MARK" ] && [ ! -L "$MARK" ] && [ "$(cat "$MARK" 2>/dev/null)" = "$KEY" ] &&
-        ls /data/dalvik-cache/arm64/*@SystemUI@SystemUI.apk@classes.dex >/dev/null 2>&1; then
-    log "SystemUI compiled on an earlier session for this APK ($KEY): skipped"
-    exit 0
-fi
-S=$(status)
-if compiled "$S"; then
-    remember
-    log "SystemUI arm64 is $S already: nothing to compile ($KEY)"
-    exit 0
-fi
-case "$S" in
-    run-from-apk|verify|error|extract) ;;
-    *) log "SystemUI arm64 status '${S:-not read}': not compiled"; exit 0 ;;
-esac
-f=$(getprop dalvik.vm.systemuicompilerfilter)
-f=${f:-speed}
-log "SystemUI arm64 is $S ($KEY): cmd package compile -m $f -f com.android.systemui"
-t0=$(date +%s)
-R=$(timeout 300 cmd package compile -m "$f" -f com.android.systemui 2>&1)
-rc=$?
-t=$(($(date +%s) - t0))
-A=$(status)
-log "result: $(echo "$R" | tail -n 1 | cut -c1-200) (exit $rc, $t s); SystemUI arm64 now ${A:-not read}"
-case "$A" in
-    ''|run-from-apk|error|extract) log "no marker: tried again next session" ;;
-    *) if [ $rc = 0 ] && echo "$R" | grep -q '^Success'; then
-           remember && log "marker saved: later sessions skip this until the APK or the boot image changes"
-       else
-           log "no marker: tried again next session"
-       fi ;;
-esac
+sysui
 SYSUI
+    if [ "${ONEOS_GUEST_LAUNCHER_COMPILE:-1}" = 1 ]; then
+        cat >> "$STAGE/data/oneos_sysui_compile.sh" <<'LAUNCHER'
+# The ColorOS launcher (OplusLauncher.apk), after SystemUI's step and with no further wait.
+launcher() {
+    LMARK=/data/oneos_launcher_compiled
+    LAPK=$(timeout 60 pm path com.android.launcher 2>/dev/null | sed -n 's/^package://p' | head -n 1)
+    [ -n "$LAPK" ] && [ -f "$LAPK" ] || { log "launcher: no APK from pm path com.android.launcher ('$LAPK'): nothing to do"; return 0; }
+    # dalvik-cache odex name ends in <directory>@<file>@classes.dex, wherever the APK is mounted.
+    d=${LAPK%/*}
+    ODEX="*@${d##*/}@${LAPK##*/}@classes.dex"
+    LKEY=$(apkkey "$LAPK")
+    if [ -f "$LMARK" ] && [ ! -L "$LMARK" ] && [ "$(cat "$LMARK" 2>/dev/null)" = "$LKEY" ] &&
+            ls /data/dalvik-cache/arm64/$ODEX >/dev/null 2>&1; then
+        log "launcher compiled on an earlier session for this APK ($LAPK, $LKEY): skipped"
+        return 0
+    fi
+    S=$(status com.android.launcher)
+    if compiled "$S"; then
+        remember "$LMARK" "$LKEY"
+        log "launcher arm64 is $S already: nothing to compile ($LAPK, $LKEY)"
+        return 0
+    fi
+    case "$S" in
+        run-from-apk|verify|error|extract) ;;
+        *) log "launcher arm64 status '${S:-not read}': not compiled"; return 0 ;;
+    esac
+    log "launcher arm64 is $S ($LAPK, $LKEY): cmd package compile -m speed -f com.android.launcher"
+    t0=$(date +%s)
+    R=$(timeout 300 cmd package compile -m speed -f com.android.launcher 2>&1)
+    rc=$?
+    t=$(($(date +%s) - t0))
+    A=$(status com.android.launcher)
+    log "launcher result: $(echo "$R" | tail -n 1 | cut -c1-200) (exit $rc, $t s); launcher arm64 now ${A:-not read}"
+    case "$A" in
+        ''|run-from-apk|error|extract) log "launcher: no marker: tried again next session" ;;
+        *) if [ $rc = 0 ] && echo "$R" | grep -q '^Success'; then
+               remember "$LMARK" "$LKEY" && log "launcher marker saved: later sessions skip this until the APK or the boot image changes"
+           else
+               log "launcher: no marker: tried again next session"
+           fi ;;
+    esac
+    return 0
+}
+launcher
+LAUNCHER
+    fi
     chmod 644 "$STAGE/data/oneos_sysui_compile.sh"
     $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_sysui_compile.sh" 2>/dev/null || true
-    echo "ColorOS SystemUI compile: checked 60 s after the UI activator starts it (with the guest's own artd only), once per SystemUI.apk (oneos_sysui_compile.log in the guest data)"
+    echo "ColorOS SystemUI compile: checked 60 s after the UI activator starts it (with the guest's own artd only), once per SystemUI.apk, then the launcher once per its APK ($([ "${ONEOS_GUEST_LAUNCHER_COMPILE:-1}" = 1 ] && echo on || echo "off, ONEOS_GUEST_LAUNCHER_COMPILE=$ONEOS_GUEST_LAUNCHER_COMPILE")) (oneos_sysui_compile.log in the guest data)"
 else
     echo "ColorOS SystemUI compile: not a ColorOS guest"
 fi
