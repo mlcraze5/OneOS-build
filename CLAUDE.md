@@ -72,7 +72,13 @@ and before any subagent is briefed:
   `mmdisplayfeature`, `rpmh`, `charger`.
 - CPU held at about 2.4 GHz all session: One UI's power saving
   (`settings global low_power=1`) sets `cpufreq_max_limit`; the heat cap
-  respects it on purpose. Owner's setting, not a bug.
+  respects it on purpose. Owner's setting, not a bug. One UI's framework
+  stops for the guest, but the limit it wrote stays in the kernel; with power
+  saving off the heat cap clears One UI's leftover limit and the guest runs at
+  full clock (session 4d2e95c67f065941: 2246400 -> -1, 3.53/4.47 GHz).
+- Samsung's lazy artd started by init during a guest session aborts with
+  `Got callback on service which we did not register: ...IArtd`; the guest's
+  own artd serves the compiles. Seen in every session, harmless.
 - ColorOS face unlock that needs a swipe: the guest's
   `oplus_customize_face_unlock_remain_unlock_switch` (stay on lock screen) is
   on. Owner's setting.
