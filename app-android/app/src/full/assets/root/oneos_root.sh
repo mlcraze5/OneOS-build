@@ -2120,6 +2120,17 @@ bring_sources() {
 # a read-only bind of /data without the mounts on it (a non-recursive bind shows
 # the trees under the bridges). The namespace, and the view with it, goes when
 # this process ends; the guest and One UI never see it.
+# The read-only remount names both the source and the view: with the view alone
+# busybox looks it up in /proc/mounts first, and during a session on the S25
+# Ultra (ColorOS 17, 0.5.16, session 2c804690b9171656) that lookup missed it
+# ("can't find .../incoming/onui_data in /proc/mounts"), so every bring was
+# refused. With both, busybox calls mount(2) at once (the kernel ignores the
+# source of a remount). A bind remount sets the view's flags to exactly these,
+# so nosuid and nodev are named to keep /data's, and noexec because nothing runs
+# from it (bring only copies). Whether the view is read only is then read from
+# mountinfo, which awk reads at any line length, never by writing into it (that
+# would write into One UI's /data); a view that is not is unmounted and refused,
+# with what mountinfo shows for it.
 bring_host_view() {
     [ -z "$T" ] || return 0
     # Always a namespace of its own, also when called from one that is not
@@ -2137,7 +2148,17 @@ bring_host_view() {
     BV="$STAGE/incoming/onui_data"
     [ ! -L "$BV" ] || refuse "${BV#$T} is a link"
     mkdir -p "$BV" || die "could not make ${BV#$T}"
-    "$BB" mount --bind "$DATA" "$BV" && "$BB" mount -o remount,bind,ro "$BV" || refuse "could not open One UI's data for reading"
+    "$BB" mount --bind "$DATA" "$BV" || refuse "could not open One UI's data for reading"
+    "$BB" mount -o remount,bind,ro,nosuid,nodev,noexec "$DATA" "$BV"
+    # The last mount at the view is the one just made (this namespace's own).
+    case ",$(awk -v p="$BV" '$5 == p { o = $6 } END { print o }' "$PROC/self/mountinfo" 2>/dev/null)," in
+        *,ro,*) ;;
+        *)
+            bv_seen=$(awk '$5 ~ /\/incoming\/onui_data$/ { printf "%s %s; ", $5, $6 }' "$PROC/self/mountinfo" 2>/dev/null | cut -c1-200)
+            "$BB" umount "$BV" 2>/dev/null || "$BB" umount -l "$BV" 2>/dev/null
+            refuse "could not make One UI's data read only (mountinfo: ${bv_seen:-no mount at the view})"
+            ;;
+    esac
     [ -d "$BV/app" ] || refuse "One UI's app folder is not in the view"
     BRING_HOST=$BV
 }

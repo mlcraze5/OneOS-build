@@ -7,6 +7,11 @@ user app", Galaxy S23 HyperOS 0.5.15). bring-add now re-runs itself in a mount
 namespace of its own and reads a read-only, non-recursive bind of /data, which
 shows the trees under the bridges. Runs the real functions as root in a
 throwaway mount namespace, with a fake /data whose app folder is bridged.
+
+The read-only remount names the source and the view: with the view alone
+busybox first looks it up in /proc/mounts, and on the S25 Ultra (ColorOS 17,
+0.5.16, session 2c804690b9171656) that lookup failed during a session, so every
+bring was refused. The view is then checked read only from mountinfo.
 """
 import os
 import shutil
@@ -25,7 +30,11 @@ def function(name):
 
 
 DRIVER = r'''
-refuse() { echo "@@REFUSED $*"; exit 3; }
+refuse() {
+    echo "@@REFUSED $*"
+    [ -z "${BV:-}" ] || awk -v p="$BV" '$5 == p { print "left=" $5 " " $6 }' /proc/self/mountinfo
+    exit 3
+}
 die() { echo "@@FAILED $*"; exit 4; }
 mine() { return 0; }
 mkdir_mine() { mkdir -p "$1"; }
@@ -36,12 +45,31 @@ pkg=$2
 bring_host_view "$pkg"
 echo "pid=$$ ns=${ONEOS_BRING_NS:-}"
 echo "host=${BRING_HOST:-}"
+echo "opts=$(awk -v p="$BRING_HOST" '$5 == p { o = $6 } END { print o }' /proc/self/mountinfo)"
 BRING_LIVE=1
 echo "apk=$(bring_apk_path "$pkg")"
 bring_sources
 echo "ce=$BCE"
 ls "$BCE"
 touch "$BRING_HOST/app/written" 2>/dev/null && echo WRITABLE || echo READONLY
+'''
+
+
+BB_STANDIN = r'''#!/bin/sh
+c=$1; shift
+[ "$c" = unshare ] && [ "$3" = /system/bin/sh ] && { a=$1; b=$2; shift 3; set -- "$a" "$b" sh "$@"; }
+if [ "$c" = mount ] && [ "$1" = -o ]; then
+    case "$2" in
+        remount*)
+            [ "${FAKE_BB_MODE:-}" = skip-remount ] && exit 0
+            if [ "${FAKE_BB_MODE:-}" = one-arg-fails ] && [ $# -eq 3 ]; then
+                echo "mount: can't find $3 in /proc/mounts" >&2
+                exit 1
+            fi ;;
+    esac
+fi
+case "$c" in mount|umount) [ -n "{busybox}" ] && exec "{busybox}" "$c" "$@" ;; esac
+exec "$c" "$@"
 '''
 
 
@@ -63,8 +91,12 @@ class BringHostViewTest(unittest.TestCase):
         (r / 'stage/data/data').mkdir(parents=True)
         bb = r / 'bb'
         # The phone's busybox; this container has no /system/bin/sh, so the stand-in
-        # runs the re-exec with sh.
-        bb.write_text('#!/bin/sh\nc=$1; shift\n[ "$c" = unshare ] && [ "$3" = /system/bin/sh ] && { a=$1; b=$2; shift 3; set -- "$a" "$b" sh "$@"; }\nexec "$c" "$@"\n')
+        # runs the re-exec with sh. mount and umount are busybox's own when it is
+        # here (the two-argument remount is busybox's code path, not util-linux's).
+        # FAKE_BB_MODE=skip-remount makes a remount do nothing (a view left
+        # writable); one-arg-fails fails a remount given the view alone, as the
+        # phone's busybox did.
+        bb.write_text(BB_STANDIN.replace('{busybox}', shutil.which('busybox') or ''))
         os.chmod(bb, 0o755)
         script = r / 'oneos_root.sh'
         fns = ''.join(function(n) for n in ('bring_host_view', 'bring_apk_path', 'bring_sources'))
@@ -74,9 +106,10 @@ class BringHostViewTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def run_bridged(self):
+    def run_bridged(self, mode=''):
         r = self.r
-        outer = (f'mount --make-rprivate / && mount --bind {r}/data {r}/data && '
+        outer = (f'export FAKE_BB_MODE={mode}; '
+                 f'mount --make-rprivate / && mount --bind {r}/data {r}/data && '
                  f'mount --bind {r}/stage/data/app {r}/data/app && '
                  f'mount --bind {r}/stage/data/data {r}/data/data && '
                  f'ls -A {r}/data/app | wc -l | sed "s/^/bridged_entries=/" && '
@@ -99,6 +132,30 @@ class BringHostViewTest(unittest.TestCase):
         out = self.run_bridged().stdout
         self.assertIn('READONLY', out)
         self.assertFalse((self.r / 'data/app/written').exists())
+        opts = next(l for l in out.splitlines() if l.startswith('opts='))[5:].split(',')
+        self.assertIn('ro', opts)
+        self.assertIn('nosuid', opts)
+        self.assertIn('nodev', opts)
+
+    def test_a_view_left_writable_is_unmounted_and_refused(self):
+        done = self.run_bridged('skip-remount')
+        out = done.stdout
+        self.assertEqual(3, done.returncode, out + done.stderr)
+        view = f'{self.r}/stage/incoming/onui_data'
+        self.assertIn(f"@@REFUSED could not make One UI's data read only (mountinfo: {view} rw", out)
+        self.assertNotIn('left=', out)
+        self.assertNotIn('host=', out)
+        self.assertNotIn('WRITABLE', out)
+        self.assertFalse((self.r / 'data/app/written').exists())
+
+    def test_a_failing_mount_table_lookup_does_not_matter(self):
+        # The phone: busybox could not find the view in /proc/mounts.
+        done = self.run_bridged('one-arg-fails')
+        out = done.stdout
+        self.assertEqual(0, done.returncode, out + done.stderr)
+        self.assertNotIn("can't find", done.stderr)
+        self.assertIn('READONLY', out)
+        self.assertIn('prefs', out)
 
     def test_it_reexecs_once_keeping_the_pid(self):
         out = self.run_bridged().stdout
@@ -117,6 +174,9 @@ class BringHostViewSourceTest(unittest.TestCase):
         body = function('do_bring_add')
         self.assertLess(body.index('is not in the catalog'), body.index('bring_host_view "$1"'))
         self.assertLess(body.index('bring_host_view "$1"'), body.index('bring_one "$1"'))
+
+    def test_the_remount_names_source_and_view(self):
+        self.assertIn('"$BB" mount -o remount,bind,ro,nosuid,nodev,noexec "$DATA" "$BV"', function('bring_host_view'))
 
     def test_tests_never_enter_a_namespace(self):
         self.assertIn('[ -z "$T" ] || return 0', function('bring_host_view'))
